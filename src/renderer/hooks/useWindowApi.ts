@@ -38,6 +38,23 @@ export const useCreateWindow = () => {
   });
 };
 
+export const useBatchCreateWindows = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (windows: Omit<WindowItem, 'id' | 'createdAt'>[]) => {
+      const res = await fetch(`${API_BASE}/windows/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(windows),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['windows'] });
+    },
+  });
+};
+
 export const useUpdateWindow = () => {
   const queryClient = useQueryClient();
   return useMutation({

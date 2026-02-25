@@ -1,116 +1,158 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
-import { TransformWrapper, TransformComponent, useTransformEffect, useTransformContext } from 'react-zoom-pan-pinch';
-import { Box, Paper, Text, Stack } from '@mantine/core';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { Paper, Box } from '@mantine/core';
 import { useWindowStore } from '../../stores/windowStore';
 import { WindowItem } from '../../../shared/schemas';
 
+const ACI_COLORS: Record<number, string> = {
+  1: '#FF0000', 2: '#FFFF00', 3: '#00FF00', 4: '#00FFFF', 5: '#0000FF', 6: '#FF00FF', 
+  7: '#1A1B1E', 8: '#808080', 9: '#C0C0C0', 256: '#1A1B1E', 0: '#1A1B1E'
+};
+
 interface DxfViewerProps {
-  dxfEntities: any[];
+  dxfData: { entities: any[], layers: any } | null;
   windows: WindowItem[];
 }
 
-export const DxfViewer = ({ dxfEntities, windows }: DxfViewerProps) => {
+export const DxfViewer = ({ dxfData, windows }: DxfViewerProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const transformRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const { activeWindowId } = useWindowStore();
 
-  // 坐标转换映射配置
-  const [viewState, setViewState] = useState({ scale: 1, offsetX: 0, offsetY: 0, minX: 0, minY: 0 });
+  const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
 
-  // 渲染逻辑封装
-  const renderDxf = (entities: any[], canvas: HTMLCanvasElement) => {
+  // 1. 数据预处理
+  const colorGroups = useMemo(() => {
+    if (!dxfData) return null;
+    const { entities, layers } = dxfData;
+    const groups: Record<string, any[]> = {};
+
+    entities.forEach(entity => {
+      let colorIndex = entity.colorIndex;
+      if (!colorIndex || colorIndex === 256) {
+        const layer = layers[entity.layer];
+        colorIndex = layer?.colorIndex || 7;
+      }
+      const hex = ACI_COLORS[colorIndex] || '#333333';
+      if (!groups[hex]) groups[hex] = [];
+      groups[hex].push(entity);
+    });
+    return groups;
+  }, [dxfData]);
+
+  // 2. 核心绘图
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container || !colorGroups) return;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (entities.length === 0) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
 
-    // 1. 计算边界框
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    entities.forEach(entity => {
-      if (entity.vertices) {
-        entity.vertices.forEach((v: any) => {
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.scale(camera.zoom * dpr, -camera.zoom * dpr);
+    ctx.translate(camera.x, camera.y);
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // 绘制底图
+    Object.entries(colorGroups).forEach(([hex, entities]) => {
+      ctx.beginPath();
+      ctx.strokeStyle = hex;
+      ctx.lineWidth = 1.0 / (camera.zoom * dpr);
+      entities.forEach(e => {
+        if (e.type === 'LINE') {
+          ctx.moveTo(e.vertices[0].x, e.vertices[0].y);
+          ctx.lineTo(e.vertices[1].x, e.vertices[1].y);
+        } else if (e.type === 'LWPOLYLINE' || e.type === 'POLYLINE') {
+          e.vertices.forEach((v: any, i: number) => {
+            if (i === 0) ctx.moveTo(v.x, v.y); else ctx.lineTo(v.x, v.y);
+          });
+          if (e.shape) ctx.closePath();
+        }
+      });
+      ctx.stroke();
+    });
+
+    // 绘制窗户
+    windows.forEach(win => {
+      const isActive = win.id === activeWindowId;
+      ctx.beginPath();
+      ctx.strokeStyle = isActive ? '#228BE6' : '#F76707'; // 橙色显示识别出的图形
+      ctx.lineWidth = (isActive ? 5.0 : 2.5) / (camera.zoom * dpr);
+      win.points.forEach((p, i) => {
+        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+    });
+
+    ctx.restore();
+  }, [colorGroups, windows, activeWindowId, camera]);
+
+  // 初始视野计算
+  useEffect(() => {
+    if (dxfData?.entities.length) {
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      dxfData.entities.forEach(e => {
+        const pts = e.vertices || (e.center ? [{x: e.center.x - e.radius, y: e.center.y - e.radius}, {x: e.center.x + e.radius, y: e.center.y + e.radius}] : []);
+        pts.forEach((v: any) => {
           minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
           minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
         });
+      });
+      if (minX !== Infinity) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          const zoom = Math.min((rect.width - 100) / (maxX - minX), (rect.height - 100) / (maxY - minY));
+          setCamera({ x: -(minX + maxX) / 2, y: -(minY + maxY) / 2, zoom: zoom || 1 });
+        }
       }
-    });
+    }
+  }, [dxfData]);
 
-    const dxfWidth = maxX - minX;
-    const dxfHeight = maxY - minY;
-    const padding = 50;
-    const scale = Math.min((canvas.width - padding * 2) / dxfWidth, (canvas.height - padding * 2) / dxfHeight);
-    
-    setViewState({ scale, minX, minY, offsetX: canvas.width / 2, offsetY: canvas.height / 2 });
+  const handleWheel = (e: React.WheelEvent) => {
+    const factor = -e.deltaY > 0 ? 1.15 : 0.85;
+    setCamera(prev => ({ ...prev, zoom: Math.max(0.0001, Math.min(prev.zoom * factor, 5000)) }));
+  };
 
-    ctx.save();
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.scale(scale, -scale); 
-    ctx.translate(-(minX + maxX) / 2, -(minY + maxY) / 2);
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 0 || e.button === 1) {
+      setIsDragging(true);
+      setLastMouse({ x: e.clientX, y: e.clientY });
+    }
+  };
 
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1 / scale;
-
-    entities.forEach((entity) => {
-      ctx.beginPath();
-      if (entity.type === 'LINE') {
-        ctx.moveTo(entity.vertices[0].x, entity.vertices[0].y);
-        ctx.lineTo(entity.vertices[1].x, entity.vertices[1].y);
-      } else if (entity.type === 'LWPOLYLINE' || entity.type === 'POLYLINE') {
-        entity.vertices.forEach((v: any, i: number) => {
-          if (i === 0) ctx.moveTo(v.x, v.y);
-          else ctx.lineTo(v.x, v.y);
-        });
-        if (entity.shape) ctx.closePath();
-      }
-      ctx.stroke();
-    });
-    ctx.restore();
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const dx = (e.clientX - lastMouse.x) / camera.zoom;
+    const dy = -(e.clientY - lastMouse.y) / camera.zoom;
+    setCamera(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+    setLastMouse({ x: e.clientX, y: e.clientY });
   };
 
   useEffect(() => {
-    if (canvasRef.current) renderDxf(dxfEntities, canvasRef.current);
-  }, [dxfEntities]);
-
-  // 当选中的窗户 ID 改变时，自动缩放聚焦
-  useEffect(() => {
-    if (activeWindowId && transformRef.current && viewState.scale !== 1) {
-      const activeWin = windows.find(w => w.id === activeWindowId);
-      if (activeWin && activeWin.points.length > 0) {
-        const { setTransform } = transformRef.current;
-        
-        // 计算窗户中心 (DXF 坐标系)
-        let cx = 0, cy = 0;
-        activeWin.points.forEach(p => { cx += p.x; cy += p.y; });
-        cx /= activeWin.points.length;
-        cy /= activeWin.points.length;
-
-        // 这是一个工业级的自动聚焦逻辑：
-        // 我们将 TransformWrapper 的缩放倍数提高，并计算偏移量使坐标居中
-        setTransform(0, 0, 3, 400, 'easeOut'); 
-      }
-    }
-  }, [activeWindowId, windows, viewState]);
+    const frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  }, [draw]);
 
   return (
-    <Paper
-      withBorder
-      radius="sm"
-      p={0}
-      shadow="xs"
-      style={{ flex: 1, overflow: 'hidden', background: '#f8f9fa' }}
-    >
-      <TransformWrapper
-        ref={transformRef}
-        initialScale={1}
-        minScale={0.1}
-        maxScale={50}
-        centerOnInit
-      >
-        <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
-          <canvas ref={canvasRef} width={2000} height={2000} />
-        </TransformComponent>
-      </TransformWrapper>
+    <Paper ref={containerRef} withBorder style={{ width: '100%', height: '100%', overflow: 'hidden', cursor: isDragging ? 'grabbing' : 'crosshair' }}
+      onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={() => setIsDragging(false)} onMouseLeave={() => setIsDragging(false)}>
+      <canvas ref={canvasRef} style={{ display: 'block' }} />
     </Paper>
   );
 };

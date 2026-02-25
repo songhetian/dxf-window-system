@@ -1,11 +1,10 @@
-import { app, BrowserWindow, protocol, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
-import fs from 'fs';
 import { startServer } from './services/fastify';
 import DxfParser from 'dxf-parser';
 
 // 启动 Fastify 服务
-const PORT = 3002; // 固定或动态分配
+const PORT = 3002;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -13,16 +12,20 @@ function createWindow() {
     height: 900,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: true,
-      contextIsolation: false,
+      nodeIntegration: false,
+      contextIsolation: true,
     },
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 10, y: 10 },
   });
 
+  // 自动开启开发者工具以便调试
+  win.webContents.openDevTools();
+
   // 将端口号传递给渲染进程
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('api-port', PORT);
+    console.log(`Sent API port ${PORT} to renderer`);
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
@@ -33,7 +36,7 @@ function createWindow() {
 }
 
 // 性能优化：在主进程处理 DXF 解析，避免阻塞 UI
-ipcMain.handle('parse-dxf', async (event, content: string) => {
+ipcMain.handle('parse-dxf', async (_event, content: string) => {
   const parser = new DxfParser();
   try {
     return parser.parseSync(content);
@@ -44,9 +47,16 @@ ipcMain.handle('parse-dxf', async (event, content: string) => {
 });
 
 app.whenReady().then(async () => {
-  await startServer(PORT);
-  createWindow();
-  // ... rest
+  try {
+    await startServer(PORT);
+    createWindow();
+  } catch (err) {
+    console.error('Failed to start server:', err);
+  }
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
 });
 
 app.on('window-all-closed', () => {

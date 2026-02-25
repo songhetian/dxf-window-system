@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const UnitSchema = z.enum(['mm', 'm']);
 export type Unit = z.infer<typeof UnitSchema>;
 
-export const WindowItemSchema = z.z.object({
+export const WindowItemSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(1, '名称不能为空'),
   category: z.string().default('默认'),
@@ -11,7 +11,9 @@ export const WindowItemSchema = z.z.object({
   width: z.number().positive(),
   height: z.number().positive(),
   area: z.number().positive(),
+  glassArea: z.number().nonnegative().optional(), // 净玻璃面积
   perimeter: z.number().positive(),
+  frameWeight: z.number().nonnegative().optional(), // 预估型材重量 (kg)
   points: z.array(z.object({ x: z.number(), y: z.number() })), // 鞋带算法所需的顶点坐标
   createdAt: z.string().optional(),
 });

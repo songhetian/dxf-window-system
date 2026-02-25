@@ -9,9 +9,11 @@ import {
   Button,
   SimpleGrid,
   ScrollArea,
+  Divider,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconTrash, IconEdit, IconChevronDown, IconChevronUp, IconFocus } from '@tabler/icons-react';
+import { IconTrash, IconEdit, IconChevronDown, IconChevronUp, IconFocus, IconLayersSubtract } from '@tabler/icons-react';
+import { useMemo } from 'react';
 import { WindowItem } from '../../../shared/schemas';
 import { useWindowStore, formatUnit, getUnitSymbol, getAreaSymbol } from '../../stores/windowStore';
 
@@ -21,26 +23,58 @@ interface WindowListProps {
   onEdit: (window: WindowItem) => void;
 }
 
+/**
+ * 工业级窗户列表：支持自动归类 (同尺寸/形状聚合)
+ * 提升解析后的查看效率
+ */
 export const WindowList = ({ windows, onDelete, onEdit }: WindowListProps) => {
+  // 核心逻辑：根据 宽度、高度、形状类型 自动分组
+  const groupedWindows = useMemo(() => {
+    const groups: Record<string, { key: string; items: WindowItem[]; width: number; height: number; shapeType: string }> = {};
+    
+    windows.forEach((win) => {
+      // 这里的 Key 使用原始 mm 精度，避免单位转换导致的细微偏差影响分组
+      const groupKey = `${Math.round(win.width)}-${Math.round(win.height)}-${win.shapeType}`;
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          key: groupKey,
+          items: [],
+          width: win.width,
+          height: win.height,
+          shapeType: win.shapeType,
+        };
+      }
+      groups[groupKey].items.push(win);
+    });
+
+    return Object.values(groups).sort((a, b) => b.items.length - a.items.length); // 数量多的排前面
+  }, [windows]);
+
   return (
     <Stack gap="md">
-      <Group justify="space-between">
-        <Text weight={700} size="sm" c="dimmed">已解析窗户数量: {windows.length}</Text>
+      <Group justify="space-between" px="xs">
+        <Stack gap={0}>
+          <Text weight={700} size="sm">窗户总数: {windows.length}</Text>
+          <Text size="xs" c="dimmed">已归类为 {groupedWindows.length} 种规格</Text>
+        </Stack>
       </Group>
 
       <ScrollArea h="calc(100vh - 180px)" offsetScrollbars>
         <Stack gap="sm">
-          {windows.map((window) => (
-            <WindowCard
-              key={window.id}
-              window={window}
+          {groupedWindows.map((group) => (
+            <WindowGroupCard
+              key={group.key}
+              group={group}
               onDelete={onDelete}
               onEdit={onEdit}
             />
           ))}
           {windows.length === 0 && (
-            <Paper p="xl" withBorder radius="sm" style={{ borderStyle: 'dashed' }}>
-              <Text c="dimmed" align="center">未解析到任何窗户</Text>
+            <Paper p="xl" withBorder radius="sm" style={{ borderStyle: 'dashed', background: 'transparent' }}>
+              <Stack align="center" gap="xs">
+                <Text c="dimmed" size="sm" align="center">尚未解析到任何有效窗户</Text>
+                <Text size="xs" c="dimmed" align="center">确保图纸中存在闭合的 LWPOLYLINE 图形</Text>
+              </Stack>
             </Paper>
           )}
         </Stack>
@@ -49,106 +83,102 @@ export const WindowList = ({ windows, onDelete, onEdit }: WindowListProps) => {
   );
 };
 
-interface WindowCardProps {
-  window: WindowItem;
+interface WindowGroupCardProps {
+  group: { key: string; items: WindowItem[]; width: number; height: number; shapeType: string };
   onDelete: (id: string) => void;
   onEdit: (window: WindowItem) => void;
 }
 
-const WindowCard = ({ window, onDelete, onEdit }: WindowCardProps) => {
+const WindowGroupCard = ({ group, onDelete, onEdit }: WindowGroupCardProps) => {
   const [opened, { toggle }] = useDisclosure(false);
   const { unit, setActiveWindowId, activeWindowId } = useWindowStore();
-  const isActive = activeWindowId === window.id;
+  
+  // 检查当前组内是否有选中的项
+  const hasActiveItem = useMemo(() => 
+    group.items.some(item => item.id === activeWindowId),
+  [group.items, activeWindowId]);
 
   return (
     <Paper
       withBorder
-      p="sm"
       radius="sm"
-      shadow={isActive ? 'sm' : 'xs'}
+      shadow={hasActiveItem ? 'sm' : 'xs'}
       style={{
         transition: 'all 0.2s ease',
-        borderColor: isActive ? 'var(--mantine-color-blue-filled)' : undefined,
-        cursor: 'pointer',
-      }}
-      onClick={() => {
-        setActiveWindowId(window.id!);
-        toggle();
+        borderColor: hasActiveItem ? 'var(--mantine-color-blue-filled)' : undefined,
       }}
     >
-      <Stack gap="xs">
-        <Group justify="space-between" wrap="nowrap">
+      <Stack gap={0}>
+        {/* 分组头部：展示规格与数量 */}
+        <Group p="sm" justify="space-between" wrap="nowrap" onClick={toggle} style={{ cursor: 'pointer' }}>
+          <Stack gap={2}>
+            <Group gap="xs">
+              <Text weight={700} size="sm">
+                {formatUnit(group.width, unit)} × {formatUnit(group.height, unit)}
+              </Text>
+              <Badge size="xs" radius="sm" variant="light">{group.shapeType}</Badge>
+            </Group>
+            <Text size="xs" c="dimmed">{getUnitSymbol(unit)}</Text>
+          </Stack>
+          
           <Group gap="xs">
-            <Text weight={700} size="sm">{window.name}</Text>
-            <Badge size="xs" radius="sm" variant="light">{window.shapeType}</Badge>
+            <Badge color="blue" radius="xl" size="lg" variant="filled">
+              {group.items.length} 樘
+            </Badge>
+            {opened ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
           </Group>
-          <Group gap={4}>
-            <ActionIcon
-              variant="subtle"
-              color="blue"
-              onClick={(e) => {
-                e.stopPropagation();
-                onEdit(window);
-              }}
-            >
-              <IconEdit size={16} />
-            </ActionIcon>
-            <ActionIcon
-              variant="subtle"
-              color="red"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(window.id!);
-              }}
-            >
-              <IconTrash size={16} />
-            </ActionIcon>
-          </Group>
-        </Group>
-
-        <Group justify="space-between" align="flex-end">
-          <Stack gap={0}>
-            <Text size="xs" c="dimmed">尺寸 ({getUnitSymbol(unit)})</Text>
-            <Text size="sm" weight={500}>
-              {formatUnit(window.width, unit)} x {formatUnit(window.height, unit)}
-            </Text>
-          </Stack>
-          <Stack gap={0} align="flex-end">
-            <Text size="xs" c="dimmed">面积 ({getAreaSymbol(unit)})</Text>
-            <Text size="sm" color="blue" weight={700}>
-              {formatUnit(window.area, unit)}
-            </Text>
-          </Stack>
         </Group>
 
         <Collapse in={opened}>
-          <SimpleGrid cols={2} mt="xs">
-            <Stack gap={0}>
-              <Text size="xs" c="dimmed">周长 ({getUnitSymbol(unit)})</Text>
-              <Text size="xs">{formatUnit(window.perimeter, unit)}</Text>
-            </Stack>
-            <Stack gap={0}>
-              <Text size="xs" c="dimmed">顶点数</Text>
-              <Text size="xs">{window.points.length}</Text>
-            </Stack>
-          </SimpleGrid>
-          
-          <Button
-            fullWidth
-            mt="sm"
-            size="compact-xs"
-            leftSection={<IconFocus size={14} />}
-            variant="light"
-            onClick={(e) => {
-              e.stopPropagation();
-              setActiveWindowId(window.id!);
-              // 调用 Zoom-to-fit
-            }}
-          >
-            定位此窗户
-          </Button>
+          <Divider variant="dashed" />
+          <Stack gap={0} p="xs">
+            {group.items.map((window, index) => (
+              <Paper 
+                key={window.id} 
+                p="xs" 
+                radius="xs"
+                style={{ 
+                  backgroundColor: activeWindowId === window.id ? 'var(--mantine-color-blue-light)' : 'transparent',
+                  cursor: 'pointer',
+                  borderBottom: '1px solid #F1F3F5'
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveWindowId(window.id!);
+                }}
+              >
+                <Group justify="space-between" wrap="nowrap">
+                  <Stack gap={2}>
+                    <Text size="xs" weight={700}>#{index + 1} {window.name}</Text>
+                    <Group gap="xs">
+                      <Text size="10px" c="dimmed">面: {formatUnit(window.area, unit)} {getAreaSymbol(unit)}</Text>
+                      <Text size="10px" c="dimmed">玻: {formatUnit(window.glassArea || 0, unit)} {getAreaSymbol(unit)}</Text>
+                      <Text size="10px" c="blue">重: {(window.frameWeight || 0).toFixed(2)} kg</Text>
+                    </Group>
+                  </Stack>
+                  <Group gap={4}>
+                    <ActionIcon size="sm" variant="subtle" onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveWindowId(window.id!);
+                    }}>
+                      <IconFocus size={14} />
+                    </ActionIcon>
+                    <ActionIcon size="sm" variant="subtle" color="blue" onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit(window);
+                    }}>
+                      <IconEdit size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Group>
+              </Paper>
+            ))}
+          </Stack>
         </Collapse>
       </Stack>
     </Paper>
   );
 };
+
+// 辅助组件：Tooltip
+import { Tooltip } from '@mantine/core';
