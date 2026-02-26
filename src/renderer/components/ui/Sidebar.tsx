@@ -12,6 +12,7 @@ export const Sidebar = () => {
   const menuItems = [
     { icon: IconFileCode, label: '图纸解析', path: '/' },
     { icon: IconHistory, label: '图纸记录', path: '/records' },
+    { icon: IconSettings, label: '识别标准', path: '/standards' },
   ];
 
   return (

@@ -16,6 +16,19 @@ interface WindowState {
   
   unitWeight: number; // 型材米重 (kg/m)
   setUnitWeight: (val: number) => void;
+
+  identRules: {
+    windowPrefix: string;
+    windowPattern: string;
+    doorPrefix: string;
+    doorPattern: string;
+    wallAreaThreshold: number;
+  };
+  setIdentRules: (rules: Partial<WindowState['identRules']>) => void;
+  
+  // 新增：多标准选择
+  selectedStandardId: string | null;
+  setSelectedStandardId: (id: string | null) => void;
 }
 
 export const useWindowStore = create<WindowState>((set) => ({
@@ -24,7 +37,6 @@ export const useWindowStore = create<WindowState>((set) => ({
   activeWindowId: null,
   setActiveWindowId: (activeWindowId) => set({ activeWindowId }),
 
-  // 默认值：1:1 绘图, 60mm 框宽, 1.5kg/m 米重
   scaleFactor: 1.0,
   setScaleFactor: (scaleFactor) => set({ scaleFactor }),
   
@@ -33,6 +45,18 @@ export const useWindowStore = create<WindowState>((set) => ({
   
   unitWeight: 1.5,
   setUnitWeight: (unitWeight) => set({ unitWeight }),
+
+  identRules: {
+    windowPrefix: 'C',
+    windowPattern: 'C\\d{4}',
+    doorPrefix: 'M',
+    doorPattern: 'M\\d{4}',
+    wallAreaThreshold: 10,
+  },
+  setIdentRules: (rules) => set((state) => ({ identRules: { ...state.identRules, ...rules } })),
+
+  selectedStandardId: 'default-std',
+  setSelectedStandardId: (id) => set({ selectedStandardId: id }),
 }));
 
 // 单位转换工具

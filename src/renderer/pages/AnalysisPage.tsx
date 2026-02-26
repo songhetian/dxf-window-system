@@ -1,12 +1,13 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Button, Group, FileButton, Stack, Title, Text, Paper, Progress, Box, TextInput, Modal, ActionIcon, Tooltip, Badge, Center, Loader, Menu } from '@mantine/core';
-import { IconFileCode, IconRefresh, IconTrash, IconDeviceFloppy, IconFocusCentered, IconDownload, IconChevronDown } from '@tabler/icons-react';
+import { Button, Group, FileButton, Stack, Title, Text, Paper, Progress, Box, TextInput, Modal, ActionIcon, Tooltip, Badge, Center, Loader, Menu, Select } from '@mantine/core';
+import { IconFileCode, IconRefresh, IconTrash, IconDeviceFloppy, IconFocusCentered, IconDownload, IconChevronDown, IconSettings } from '@tabler/icons-react';
 import { modals } from '@mantine/modals';
 
 import { DxfViewer, DxfViewerRef } from '../features/DxfViewer/DxfViewer';
 import { WindowList } from '../features/WindowList/WindowList';
 import { useDxfProcessor } from '../hooks/useDxfProcessor';
 import { usePdfExport } from '../hooks/usePdfExport';
+import { useWindowApi, useStandards } from '../hooks/useWindowApi';
 import { useWindowStore } from '../stores/windowStore';
 import { WindowItem } from '../../shared/schemas';
 
@@ -19,6 +20,9 @@ const AnalysisPage = () => {
   const [saveModalOpened, setSaveModalOpened] = useState(false);
   const [drawingTitle, setDrawingTitle] = useState('');
   const [importKey, setImportKey] = useState(0);
+
+  const { data: standards = [] } = useStandards();
+  const { selectedStandardId, setSelectedStandardId, setIdentRules } = useWindowStore();
 
   const handleSave = async () => {
     if (!drawingTitle) return;
@@ -41,18 +45,50 @@ const AnalysisPage = () => {
     });
   }, [clear]);
 
+  const handleFileSelect = (file: File) => {
+    modals.openConfirmModal({
+      title: '识别标准选择',
+      centered: true,
+      children: (
+        <Stack gap="sm">
+          <Text size="sm">请选择本次图纸解析所使用的识别标准：</Text>
+          <Select
+            data={standards.map((s: any) => ({ value: s.id, label: s.name }))}
+            value={selectedStandardId}
+            onChange={(val) => {
+              const std = standards.find((s: any) => s.id === val);
+              if (std) {
+                setSelectedStandardId(std.id);
+                setIdentRules({
+                  windowPrefix: std.windowPattern.charAt(0),
+                  windowPattern: std.windowPattern,
+                  wallAreaThreshold: std.wallAreaThreshold
+                });
+              }
+            }}
+            placeholder="请选择标准"
+            leftSection={<IconSettings size={16} />}
+          />
+          <Text size="xs" c="dimmed">
+            系统将依据该标准的编号规则（如 C+数字）和墙体面积阈值自动识别窗户。
+          </Text>
+        </Stack>
+      ),
+      labels: { confirm: '开始解析', cancel: '取消' },
+      onConfirm: () => processDxf(file),
+    });
+  };
+
   return (
     <Box style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', flexDirection: 'column' }}>
-      
-      {/* 顶部 Header：修正宽度，优化按钮组 */}
-      <Paper h={60} px="md" shadow="none" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #DEE2E6', background: '#fff', flexShrink: 0, zIndex: 10, WebkitAppRegion: 'drag' as any }}>
+      <Paper h={60} px="md" shadow="none" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #DEE2E6', background: '#fff', flexShrink: 0, zIndex: 10 }}>
         <Box style={{ width: 80 }} />
         <Group gap="sm" style={{ flex: 1, minWidth: 0 }}>
            <Title order={5} style={{ color: '#1A1B1E', fontWeight: 800, whiteSpace: 'nowrap' }}>智能解析工作台</Title>
            {fileName && <Badge variant="filled" color="blue" size="sm" radius="xs" style={{ flexShrink: 1 }}>{fileName}</Badge>}
         </Group>
 
-        <Group gap="xs" wrap="nowrap" style={{ WebkitAppRegion: 'no-drag', flexShrink: 0 }}>
+        <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
           {processedResult && (
             <Menu shadow="md" width={150}>
               <Menu.Target>
@@ -77,7 +113,7 @@ const AnalysisPage = () => {
           
           <Button variant="subtle" color="red" size="sm" onClick={openClearConfirm} disabled={!processedResult && pendingWindows.length === 0}>清空</Button>
           
-          <FileButton key={importKey} onChange={(file) => file && processDxf(file)} accept=".dxf">
+          <FileButton key={importKey} onChange={(file) => file && handleFileSelect(file)} accept=".dxf">
             {(props) => <Button {...props} variant="filled" size="sm" color="blue" leftSection={<IconFileCode size={16} />} loading={isProcessing}>导入 DXF</Button>}
           </FileButton>
 
@@ -90,12 +126,11 @@ const AnalysisPage = () => {
       </Paper>
 
       <Box style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* 左侧列表 */}
         <Box style={{ width: 340, minWidth: 340, flexShrink: 0, borderRight: '1px solid #DEE2E6', background: '#fff', display: 'flex', flexDirection: 'column' }}>
           <Box p="sm" style={{ borderBottom: '1px solid #F1F3F5', background: '#F8F9FA' }}>
             <Group justify="space-between">
               <Text size="xs" weight={800} color="gray.7">已识别清单</Text>
-              <Badge color="blue" variant="filled" size="xs">{pendingWindows.length} 樘</Badge>
+              <Badge color="blue" variant="filled" size="xs">{pendingWindows.length}</Badge>
             </Group>
           </Box>
           <Box style={{ flex: 1, overflow: 'hidden' }}>
@@ -103,7 +138,6 @@ const AnalysisPage = () => {
           </Box>
         </Box>
 
-        {/* 右侧绘图区 */}
         <Box style={{ flex: 1, position: 'relative', background: '#F1F3F5', overflow: 'hidden' }}>
           {isProcessing ? (
             <Center h="100%" style={{ background: '#fff', zIndex: 1000, position: 'absolute', inset: 0 }}>

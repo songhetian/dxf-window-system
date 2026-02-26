@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS windows (
     glassArea REAL DEFAULT 0,
     perimeter REAL NOT NULL,
     frameWeight REAL DEFAULT 0,
+    handle TEXT,
+    arcRatio REAL DEFAULT 0,
+    symmetryRate REAL DEFAULT 0,
     points TEXT NOT NULL, -- 存储顶点坐标的 JSON 字符串
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (drawingId) REFERENCES drawings(id) ON DELETE CASCADE
@@ -30,3 +33,18 @@ CREATE TABLE IF NOT EXISTS windows (
 
 CREATE INDEX IF NOT EXISTS idx_windows_drawingId ON windows(drawingId);
 CREATE INDEX IF NOT EXISTS idx_windows_category ON windows(category);
+
+-- 识别标准配置表
+CREATE TABLE IF NOT EXISTS standards (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    windowPattern TEXT NOT NULL DEFAULT 'C\d{4}',
+    doorPattern TEXT NOT NULL DEFAULT 'M\d{4}',
+    wallAreaThreshold REAL DEFAULT 10,
+    isDefault INTEGER DEFAULT 0,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 插入一个默认标准
+INSERT OR IGNORE INTO standards (id, name, windowPattern, doorPattern, wallAreaThreshold, isDefault) 
+VALUES ('default-std', '通用建筑标准', 'C\d{4}', 'M\d{4}', 10, 1);

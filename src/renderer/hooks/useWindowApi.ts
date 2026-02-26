@@ -89,3 +89,46 @@ export const useClearData = () => {
     },
   });
 };
+
+// --- Standards ---
+export const useStandards = () => {
+  return useQuery({
+    queryKey: ['standards'],
+    queryFn: async () => {
+      const res = await fetch(`${API_BASE}/standards`);
+      const json = await res.json();
+      return json.data || [];
+    },
+  });
+};
+
+export const useCreateStandard = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: any) => {
+      const res = await fetch(`${API_BASE}/standards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['standards'] });
+    },
+  });
+};
+
+export const useDeleteStandard = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`${API_BASE}/standards/${id}`, { method: 'DELETE' });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['standards'] });
+    },
+  });
+};
+
+

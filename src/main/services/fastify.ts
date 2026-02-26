@@ -112,9 +112,51 @@ export const startServer = async (port: number = 3001) => {
     };
   });
 
-  api.delete('/api/windows/all', async () => {
-    await db.deleteFrom('windows').execute();
-    await db.deleteFrom('drawings').execute();
+  // --- Standard Routes ---
+
+  api.get('/api/standards', async () => {
+    const stds = await db.selectFrom('standards').selectAll().orderBy('createdAt desc').execute();
+    return { success: true, data: stds };
+  });
+
+  api.post('/api/standards', {
+    schema: {
+      body: z.object({
+        name: z.string(),
+        windowPattern: z.string(),
+        doorPattern: z.string(),
+        wallAreaThreshold: z.number(),
+      }),
+    }
+  }, async (request) => {
+    const id = uuidv4();
+    const data = { ...request.body, id, isDefault: 0, createdAt: new Date().toISOString() };
+    await db.insertInto('standards').values(data).execute();
+    return { success: true, data };
+  });
+
+  api.delete('/api/standards/:id', async (request) => {
+    const { id } = (request.params as any);
+    await db.deleteFrom('standards').where('id', '=', id).execute();
+    return { success: true };
+  });
+
+  api.patch('/api/standards/:id', {
+    schema: {
+      params: z.object({ id: z.string() }),
+      body: z.object({
+        name: z.string().optional(),
+        windowPattern: z.string().optional(),
+        doorPattern: z.string().optional(),
+        wallAreaThreshold: z.number().optional(),
+      }),
+    }
+  }, async (request) => {
+    const { id } = request.params;
+    await db.updateTable('standards')
+      .set(request.body)
+      .where('id', '=', id)
+      .execute();
     return { success: true };
   });
 

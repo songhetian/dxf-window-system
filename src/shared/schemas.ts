@@ -15,6 +15,9 @@ export const WindowItemSchema = z.object({
   glassArea: z.number().optional(),
   perimeter: z.number().optional(),
   frameWeight: z.number().optional(),
+  handle: z.string().optional(),
+  arcRatio: z.number().optional(),
+  symmetryRate: z.number().optional(),
   points: z.array(z.object({ x: z.number(), y: z.number() })),
   createdAt: z.string().optional(),
 });

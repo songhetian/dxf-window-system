@@ -38508,6 +38508,9 @@ const WindowItemSchema = object({
   glassArea: number().optional(),
   perimeter: number().optional(),
   frameWeight: number().optional(),
+  handle: string().optional(),
+  arcRatio: number().optional(),
+  symmetryRate: number().optional(),
   points: array(object({ x: number(), y: number() })),
   createdAt: string().optional()
 });
@@ -52997,59 +53000,28 @@ class SqliteDialect {
 }
 const initDb = (dbPath) => {
   const db2 = new Database(dbPath);
-  const tableExists = db2.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='drawings'").get();
-  if (!tableExists) {
-    console.log("Database not initialized. Running schema.sql...");
-    try {
-      const possiblePaths = [
-        path.join(__dirname, "schema.sql"),
-        path.join(__dirname, "../database/schema.sql"),
-        path.join(process.cwd(), "src/main/database/schema.sql")
-      ];
-      let schemaPath = "";
-      for (const p of possiblePaths) {
-        if (fs.existsSync(p)) {
-          schemaPath = p;
-          break;
-        }
+  try {
+    const possiblePaths = [
+      path.join(__dirname, "schema.sql"),
+      path.join(__dirname, "../database/schema.sql"),
+      path.join(process.cwd(), "src/main/database/schema.sql")
+    ];
+    let schemaPath = "";
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        schemaPath = p;
+        break;
       }
-      if (schemaPath) {
-        const sql2 = fs.readFileSync(schemaPath, "utf8");
-        db2.exec(sql2);
-        console.log(`Database schema initialized from ${schemaPath}`);
-      } else {
-        db2.exec(`
-          CREATE TABLE IF NOT EXISTS drawings (
-              id TEXT PRIMARY KEY,
-              title TEXT NOT NULL,
-              fileName TEXT NOT NULL,
-              windowCount INTEGER DEFAULT 0,
-              totalArea REAL DEFAULT 0,
-              createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE TABLE IF NOT EXISTS windows (
-              id TEXT PRIMARY KEY,
-              drawingId TEXT,
-              name TEXT NOT NULL,
-              category TEXT NOT NULL,
-              shapeType TEXT NOT NULL,
-              width REAL NOT NULL,
-              height REAL NOT NULL,
-              area REAL NOT NULL,
-              glassArea REAL DEFAULT 0,
-              perimeter REAL NOT NULL,
-              frameWeight REAL DEFAULT 0,
-              points TEXT NOT NULL,
-              createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-              FOREIGN KEY (drawingId) REFERENCES drawings(id) ON DELETE CASCADE
-          );
-        `);
-      }
-    } catch (err2) {
-      console.error("Failed to initialize database schema:", err2);
     }
-  } else {
-    console.log("Database already initialized. Skipping schema execution.");
+    if (schemaPath) {
+      const sql2 = fs.readFileSync(schemaPath, "utf8");
+      sql2.split(";").forEach((stmt) => {
+        if (stmt.trim()) db2.exec(stmt);
+      });
+      console.log(`Database schema verified from ${schemaPath}`);
+    }
+  } catch (err2) {
+    console.error("Failed to update database schema:", err2);
   }
   return new Kysely({
     dialect: new SqliteDialect({
@@ -53169,9 +53141,43 @@ const startServer = async (port = 3001) => {
       data: windows.map((w) => ({ ...w, points: JSON.parse(w.points) }))
     };
   });
-  api.delete("/api/windows/all", async () => {
-    await db.deleteFrom("windows").execute();
-    await db.deleteFrom("drawings").execute();
+  api.get("/api/standards", async () => {
+    const stds = await db.selectFrom("standards").selectAll().orderBy("createdAt desc").execute();
+    return { success: true, data: stds };
+  });
+  api.post("/api/standards", {
+    schema: {
+      body: object({
+        name: string(),
+        windowPattern: string(),
+        doorPattern: string(),
+        wallAreaThreshold: number()
+      })
+    }
+  }, async (request2) => {
+    const id2 = v4();
+    const data = { ...request2.body, id: id2, isDefault: 0, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+    await db.insertInto("standards").values(data).execute();
+    return { success: true, data };
+  });
+  api.delete("/api/standards/:id", async (request2) => {
+    const { id: id2 } = request2.params;
+    await db.deleteFrom("standards").where("id", "=", id2).execute();
+    return { success: true };
+  });
+  api.patch("/api/standards/:id", {
+    schema: {
+      params: object({ id: string() }),
+      body: object({
+        name: string().optional(),
+        windowPattern: string().optional(),
+        doorPattern: string().optional(),
+        wallAreaThreshold: number().optional()
+      })
+    }
+  }, async (request2) => {
+    const { id: id2 } = request2.params;
+    await db.updateTable("standards").set(request2.body).where("id", "=", id2).execute();
     return { success: true };
   });
   try {

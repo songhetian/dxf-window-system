@@ -93,5 +93,78 @@ export const calculateBoundingBox = (points: Point[]) => {
     minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
     minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
   });
-  return { width: maxX - minX, height: maxY - minY };
+  return { 
+    width: maxX - minX, 
+    height: maxY - minY,
+    centerX: (minX + maxX) / 2,
+    centerY: (minY + maxY) / 2
+  };
+};
+
+/**
+ * 判断点是否在多边形内部 (射线法)
+ */
+export const isPointInPolygon = (point: Point, vs: Point[]): boolean => {
+  const x = point.x, y = point.y;
+  let inside = false;
+  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+    const xi = vs[i].x, yi = vs[i].y;
+    const xj = vs[j].x, yj = vs[j].y;
+    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+/**
+ * 计算对称率
+ * 逻辑：将点集按中心轴镜像，检查重合点比例
+ */
+export const calculateSymmetryRate = (points: Point[]): number => {
+  if (points.length < 3) return 0;
+  const { centerX } = calculateBoundingBox(points);
+  let matched = 0;
+  const PRECISION = 10; // 10mm 误差内视为重合
+
+  points.forEach(p1 => {
+    const mirroredX = centerX - (p1.x - centerX);
+    const hasMatch = points.some(p2 => 
+      Math.abs(p2.x - mirroredX) < PRECISION && Math.abs(p2.y - p1.y) < PRECISION
+    );
+    if (hasMatch) matched++;
+  });
+  return (matched / points.length) * 100;
+};
+
+/**
+ * 识别是否包含圆弧及圆弧占比
+ * 注意：在我们的 pts 采样中，圆弧被转化为多段线
+ * 我们通过点之间的角度变化率来估算圆弧特征
+ */
+export const analyzePathFeatures = (points: Point[]) => {
+  let totalLen = 0;
+  let arcLen = 0;
+  
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    const p3 = points[(i + 2) % points.length];
+    
+    const d = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+    totalLen += d;
+
+    // 计算三点间的夹角变化，识别圆弧采样段
+    if (p3) {
+      const v1 = { x: p2.x - p1.x, y: p2.y - p1.y };
+      const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+      const angle = Math.abs(Math.atan2(v1.x * v2.y - v1.y * v2.x, v1.x * v2.x + v1.y * v2.y));
+      if (angle > 0.01 && angle < 0.5) { // 典型的圆弧采样特征
+         arcLen += d;
+      }
+    }
+  }
+  return {
+    totalLen,
+    arcRatio: (arcLen / totalLen) * 100
+  };
 };

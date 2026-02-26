@@ -8,6 +8,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/ui/Sidebar';
 import AnalysisPage from './pages/AnalysisPage';
 import RecordsPage from './pages/RecordsPage';
+import StandardsPage from './pages/StandardsPage';
 
 const theme = createTheme({
   primaryColor: 'blue',
@@ -39,6 +40,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<AnalysisPage />} />
                 <Route path="/records" element={<RecordsPage />} />
+                <Route path="/standards" element={<StandardsPage />} />
               </Routes>
             </MainLayout>
           </Router>

@@ -52,17 +52,25 @@ export const usePdfExport = () => {
       win.name,
       `${formatUnit(win.width, unit)}×${formatUnit(win.height, unit)}`,
       `${formatUnit(win.area, unit)}`,
-      `${formatUnit(win.glassArea || 0, unit)}`,
+      `${win.handle || '-'}`,
+      `${win.arcRatio ?? 0}%`,
+      `${win.symmetryRate ?? 0}%`,
       `${(win.frameWeight || 0).toFixed(2)} kg`,
     ]);
 
     doc.autoTable({
       startY: 40,
-      head: [['序号', '示意图', '名称', `尺寸(${getUnitSymbol(unit)})`, `总面(${getAreaSymbol(unit)})`, `玻璃面(${getAreaSymbol(unit)})`, '预估重量']],
+      head: [['序号', '示意图', '编号/名称', `尺寸`, `面积`, 'Handle', '弧占比', '对称率', '预估重量']],
       body: body,
       theme: 'grid',
-      headStyles: { fillStyle: '#228BE6' },
-      styles: { minCellHeight: 25, verticalAlign: 'middle', halign: 'center', fontSize: 9 },
+      headStyles: { fillColor: '#228BE6', textColor: 255 },
+      styles: { minCellHeight: 25, verticalAlign: 'middle', halign: 'center', fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 10 },
+        1: { cellWidth: 25 },
+        2: { cellWidth: 30 },
+        3: { cellWidth: 30 },
+      },
       didDrawCell: (data: any) => {
         if (data.section === 'body' && data.column.index === 1) {
           const imgData = generateThumbnail(windows[data.row.index].points);
@@ -78,12 +86,15 @@ export const usePdfExport = () => {
     const date = new Date().toLocaleDateString();
     const data = windows.map((win, index) => ({
       '序号': index + 1,
-      '窗户名称': win.name,
+      '编号/名称': win.name,
+      'Handle': win.handle || '-',
       '分类': win.category,
+      '形状': win.shapeType,
       '宽度': formatUnit(win.width, unit),
       '高度': formatUnit(win.height, unit),
       '总面积': formatUnit(win.area, unit),
-      '玻璃面积': formatUnit(win.glassArea || 0, unit),
+      '圆弧占比(%)': win.arcRatio ?? 0,
+      '对称率(%)': win.symmetryRate ?? 0,
       '预估重量(kg)': (win.frameWeight || 0).toFixed(2),
       '单位': unit.toUpperCase()
     }));
