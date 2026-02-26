@@ -34977,6 +34977,7 @@ const string$1 = (params) => {
 const integer = /^-?\d+$/;
 const number$1 = /^-?\d+(?:\.\d+)?$/;
 const boolean$1 = /^(?:true|false)$/i;
+const _null$2 = /^null$/i;
 const lowercase = /^[^A-Z]*$/;
 const uppercase = /^[^a-z]*$/;
 const $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
@@ -35848,6 +35849,23 @@ const $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
       return payload;
     payload.issues.push({
       expected: "boolean",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+const $ZodNull = /* @__PURE__ */ $constructor("$ZodNull", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = _null$2;
+  inst._zod.values = /* @__PURE__ */ new Set([null]);
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (input === null)
+      return payload;
+    payload.issues.push({
+      expected: "null",
       code: "invalid_type",
       input,
       inst
@@ -36925,6 +36943,13 @@ function _boolean(Class, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
+function _null$1(Class, params) {
+  return new Class({
+    type: "null",
+    ...normalizeParams(params)
+  });
+}
+// @__NO_SIDE_EFFECTS__
 function _unknown(Class) {
   return new Class({
     type: "unknown"
@@ -37572,6 +37597,15 @@ const numberProcessor = (schema, ctx, _json, _params) => {
 const booleanProcessor = (_schema, _ctx, json, _params) => {
   json.type = "boolean";
 };
+const nullProcessor = (_schema, ctx, json, _params) => {
+  if (ctx.target === "openapi-3.0") {
+    json.type = "string";
+    json.nullable = true;
+    json.enum = [null];
+  } else {
+    json.type = "null";
+  }
+};
 const neverProcessor = (_schema, _ctx, json, _params) => {
   json.not = {};
 };
@@ -38148,6 +38182,14 @@ const ZodBoolean = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
 function boolean(params) {
   return /* @__PURE__ */ _boolean(ZodBoolean, params);
 }
+const ZodNull = /* @__PURE__ */ $constructor("ZodNull", (inst, def) => {
+  $ZodNull.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => nullProcessor(inst, ctx, json);
+});
+function _null(params) {
+  return /* @__PURE__ */ _null$1(ZodNull, params);
+}
 const ZodUnknown = /* @__PURE__ */ $constructor("ZodUnknown", (inst, def) => {
   $ZodUnknown.init(inst, def);
   ZodType.init(inst, def);
@@ -38455,27 +38497,36 @@ function superRefine(fn) {
 _enum(["mm", "m"]);
 const WindowItemSchema = object({
   id: string().uuid().optional(),
+  drawingId: string().uuid().optional(),
+  // 关联图纸 ID
   name: string().min(1, "名称不能为空"),
   category: string().default("默认"),
   shapeType: string(),
-  // e.g., 'Rectangle', 'Polygon', 'Irregular'
-  width: number().positive(),
-  height: number().positive(),
-  area: number().positive(),
-  glassArea: number().nonnegative().optional(),
-  // 净玻璃面积
-  perimeter: number().positive(),
-  frameWeight: number().nonnegative().optional(),
-  // 预估型材重量 (kg)
+  width: number(),
+  height: number(),
+  area: number(),
+  glassArea: number().optional(),
+  perimeter: number().optional(),
+  frameWeight: number().optional(),
   points: array(object({ x: number(), y: number() })),
-  // 鞋带算法所需的顶点坐标
   createdAt: string().optional()
 });
-WindowItemSchema.omit({ id: true, createdAt: true });
-WindowItemSchema.partial().omit({ id: true, createdAt: true });
+const DrawingSchema = object({
+  id: string().uuid().optional(),
+  title: string(),
+  fileName: string(),
+  windowCount: number(),
+  totalArea: number(),
+  createdAt: string().optional()
+});
 const WindowResponseSchema = object({
   success: boolean(),
-  data: union([WindowItemSchema, array(WindowItemSchema)]).optional(),
+  data: union([array(WindowItemSchema), WindowItemSchema, _null()]).optional(),
+  error: string().optional()
+});
+const DrawingResponseSchema = object({
+  success: boolean(),
+  data: union([array(DrawingSchema), DrawingSchema, _null()]).optional(),
   error: string().optional()
 });
 function isUndefined(obj) {
@@ -52946,17 +52997,59 @@ class SqliteDialect {
 }
 const initDb = (dbPath) => {
   const db2 = new Database(dbPath);
-  try {
-    const schemaPath = path.join(__dirname, "schema.sql");
-    if (fs.existsSync(schemaPath)) {
-      const sql2 = fs.readFileSync(schemaPath, "utf8");
-      db2.exec(sql2);
-      console.log("Database schema initialized from schema.sql");
-    } else {
-      console.warn("schema.sql not found, using fallback initialization");
+  const tableExists = db2.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='drawings'").get();
+  if (!tableExists) {
+    console.log("Database not initialized. Running schema.sql...");
+    try {
+      const possiblePaths = [
+        path.join(__dirname, "schema.sql"),
+        path.join(__dirname, "../database/schema.sql"),
+        path.join(process.cwd(), "src/main/database/schema.sql")
+      ];
+      let schemaPath = "";
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          schemaPath = p;
+          break;
+        }
+      }
+      if (schemaPath) {
+        const sql2 = fs.readFileSync(schemaPath, "utf8");
+        db2.exec(sql2);
+        console.log(`Database schema initialized from ${schemaPath}`);
+      } else {
+        db2.exec(`
+          CREATE TABLE IF NOT EXISTS drawings (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL,
+              fileName TEXT NOT NULL,
+              windowCount INTEGER DEFAULT 0,
+              totalArea REAL DEFAULT 0,
+              createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE TABLE IF NOT EXISTS windows (
+              id TEXT PRIMARY KEY,
+              drawingId TEXT,
+              name TEXT NOT NULL,
+              category TEXT NOT NULL,
+              shapeType TEXT NOT NULL,
+              width REAL NOT NULL,
+              height REAL NOT NULL,
+              area REAL NOT NULL,
+              glassArea REAL DEFAULT 0,
+              perimeter REAL NOT NULL,
+              frameWeight REAL DEFAULT 0,
+              points TEXT NOT NULL,
+              createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (drawingId) REFERENCES drawings(id) ON DELETE CASCADE
+          );
+        `);
+      }
+    } catch (err2) {
+      console.error("Failed to initialize database schema:", err2);
     }
-  } catch (err2) {
-    console.error("Failed to initialize database schema:", err2);
+  } else {
+    console.log("Database already initialized. Skipping schema execution.");
   }
   return new Kysely({
     dialect: new SqliteDialect({
@@ -52998,112 +53091,87 @@ function v4(options, buf, offset) {
   return _v4(options);
 }
 const fastify = Fastify({
-  logger: true,
-  ajv: {
-    customOptions: {
-      removeAdditional: "all",
-      coerceTypes: true,
-      useDefaults: true
-    }
-  }
+  logger: true
 });
-fastify.register(cors, {
-  origin: "*",
-  // 工业开发环境下允许所有来源，生产环境建议更严格
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-});
+fastify.register(cors, { origin: "*" });
 fastify.setValidatorCompiler(validatorCompiler);
 fastify.setSerializerCompiler(serializerCompiler);
 const db = initDb("./dxf-app.db");
 const startServer = async (port = 3001) => {
   const api = fastify.withTypeProvider();
-  api.get("/api/windows", {
-    schema: {
-      response: {
-        200: WindowResponseSchema
-      }
-    }
+  api.get("/api/drawings", {
+    schema: { response: { 200: DrawingResponseSchema } }
   }, async () => {
+    const drawings = await db.selectFrom("drawings").selectAll().orderBy("createdAt desc").execute();
+    return { success: true, data: drawings };
+  });
+  api.post("/api/drawings", {
+    schema: {
+      body: object({
+        title: string(),
+        fileName: string(),
+        windows: array(WindowItemSchema.omit({ id: true, drawingId: true, createdAt: true }))
+      }),
+      response: { 201: DrawingResponseSchema }
+    }
+  }, async (request2, reply2) => {
+    const { title: title2, fileName, windows } = request2.body;
+    const drawingId = v4();
+    const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+    const totalArea = windows.reduce((sum, w) => sum + w.area, 0);
+    const drawing = {
+      id: drawingId,
+      title: title2,
+      fileName,
+      windowCount: windows.length,
+      totalArea,
+      createdAt
+    };
+    await db.insertInto("drawings").values(drawing).execute();
+    if (windows.length > 0) {
+      const windowEntries = windows.map((win) => ({
+        ...win,
+        id: v4(),
+        drawingId,
+        points: JSON.stringify(win.points),
+        createdAt
+      }));
+      await db.insertInto("windows").values(windowEntries).execute();
+    }
+    reply2.status(201).send({ success: true, data: drawing });
+  });
+  api.get("/api/drawings/:id/windows", {
+    schema: {
+      params: object({ id: string().uuid() }),
+      response: { 200: WindowResponseSchema }
+    }
+  }, async (request2) => {
+    const { id: id2 } = request2.params;
+    const windows = await db.selectFrom("windows").where("drawingId", "=", id2).selectAll().execute();
+    return {
+      success: true,
+      data: windows.map((w) => ({ ...w, points: JSON.parse(w.points) }))
+    };
+  });
+  api.delete("/api/drawings/:id", {
+    schema: {
+      params: object({ id: string().uuid() })
+    }
+  }, async (request2) => {
+    const { id: id2 } = request2.params;
+    await db.deleteFrom("drawings").where("id", "=", id2).execute();
+    return { success: true };
+  });
+  api.get("/api/windows", async () => {
     const windows = await db.selectFrom("windows").selectAll().execute();
     return {
       success: true,
       data: windows.map((w) => ({ ...w, points: JSON.parse(w.points) }))
     };
   });
-  api.post("/api/windows", {
-    schema: {
-      body: WindowItemSchema.omit({ id: true, createdAt: true }),
-      response: {
-        201: WindowResponseSchema
-      }
-    }
-  }, async (request2, reply2) => {
-    const newWindow = {
-      ...request2.body,
-      id: v4(),
-      points: JSON.stringify(request2.body.points),
-      createdAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    await db.insertInto("windows").values(newWindow).execute();
-    reply2.status(201).send({
-      success: true,
-      data: { ...newWindow, points: request2.body.points }
-    });
-  });
-  api.post("/api/windows/batch", {
-    schema: {
-      body: array(WindowItemSchema.omit({ id: true, createdAt: true })),
-      response: {
-        201: WindowResponseSchema
-      }
-    }
-  }, async (request2, reply2) => {
+  api.delete("/api/windows/all", async () => {
     await db.deleteFrom("windows").execute();
-    const windows = request2.body.map((win) => ({
-      ...win,
-      id: v4(),
-      points: JSON.stringify(win.points),
-      createdAt: (/* @__PURE__ */ new Date()).toISOString()
-    }));
-    if (windows.length > 0) {
-      await db.insertInto("windows").values(windows).execute();
-    }
-    reply2.status(201).send({
-      success: true,
-      data: windows.map((w) => ({ ...w, points: JSON.parse(w.points) }))
-    });
-  });
-  api.delete("/api/windows/all", {}, async () => {
-    await db.deleteFrom("windows").execute();
-    return { success: true };
-  });
-  api.patch("/api/windows/:id", {
-    schema: {
-      params: object({ id: string().uuid() }),
-      body: WindowItemSchema.partial().omit({ id: true, createdAt: true }),
-      response: {
-        200: WindowResponseSchema
-      }
-    }
-  }, async (request2) => {
-    const { id: id2 } = request2.params;
-    const updateData = { ...request2.body };
-    if (updateData.points) {
-      updateData.points = JSON.stringify(updateData.points);
-    }
-    await db.updateTable("windows").set(updateData).where("id", "=", id2).execute();
-    return { success: true };
-  });
-  api.delete("/api/windows/:id", {
-    schema: {
-      params: object({ id: string().uuid() }),
-      response: {
-        200: WindowResponseSchema
-      }
-    }
-  }, async (request2) => {
-    const { id: id2 } = request2.params;
-    await db.deleteFrom("windows").where("id", "=", id2).execute();
+    await db.deleteFrom("drawings").execute();
     return { success: true };
   });
   try {
@@ -55348,7 +55416,7 @@ function debugCode(curr) {
 function getAcadColor(index) {
   return AUTO_CAD_COLOR_INDEX[index];
 }
-const PORT = 3002;
+const PORT = 6002;
 function createWindow() {
   const win = new electron.BrowserWindow({
     width: 1400,

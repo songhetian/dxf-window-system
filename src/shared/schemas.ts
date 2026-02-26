@@ -5,27 +5,40 @@ export type Unit = z.infer<typeof UnitSchema>;
 
 export const WindowItemSchema = z.object({
   id: z.string().uuid().optional(),
+  drawingId: z.string().uuid().optional(), // 关联图纸 ID
   name: z.string().min(1, '名称不能为空'),
   category: z.string().default('默认'),
-  shapeType: z.string(), // e.g., 'Rectangle', 'Polygon', 'Irregular'
-  width: z.number().positive(),
-  height: z.number().positive(),
-  area: z.number().positive(),
-  glassArea: z.number().nonnegative().optional(), // 净玻璃面积
-  perimeter: z.number().positive(),
-  frameWeight: z.number().nonnegative().optional(), // 预估型材重量 (kg)
-  points: z.array(z.object({ x: z.number(), y: z.number() })), // 鞋带算法所需的顶点坐标
+  shapeType: z.string(),
+  width: z.number(),
+  height: z.number(),
+  area: z.number(),
+  glassArea: z.number().optional(),
+  perimeter: z.number().optional(),
+  frameWeight: z.number().optional(),
+  points: z.array(z.object({ x: z.number(), y: z.number() })),
+  createdAt: z.string().optional(),
+});
+
+export const DrawingSchema = z.object({
+  id: z.string().uuid().optional(),
+  title: z.string(),
+  fileName: z.string(),
+  windowCount: z.number(),
+  totalArea: z.number(),
   createdAt: z.string().optional(),
 });
 
 export type WindowItem = z.infer<typeof WindowItemSchema>;
+export type DrawingItem = z.infer<typeof DrawingSchema>;
 
-export const CreateWindowSchema = WindowItemSchema.omit({ id: true, createdAt: true });
-export const UpdateWindowSchema = WindowItemSchema.partial().omit({ id: true, createdAt: true });
-
-// Fastify 验证用的 Response Schemas
 export const WindowResponseSchema = z.object({
   success: z.boolean(),
-  data: z.union([WindowItemSchema, z.array(WindowItemSchema)]).optional(),
+  data: z.union([z.array(WindowItemSchema), WindowItemSchema, z.null()]).optional(),
+  error: z.string().optional(),
+});
+
+export const DrawingResponseSchema = z.object({
+  success: z.boolean(),
+  data: z.union([z.array(DrawingSchema), DrawingSchema, z.null()]).optional(),
   error: z.string().optional(),
 });

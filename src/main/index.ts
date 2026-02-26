@@ -4,7 +4,7 @@ import { startServer } from './services/fastify';
 import DxfParser from 'dxf-parser';
 
 // 启动 Fastify 服务
-const PORT = 3002;
+const PORT = 6002;
 
 function createWindow() {
   const win = new BrowserWindow({

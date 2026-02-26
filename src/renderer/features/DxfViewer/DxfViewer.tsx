@@ -1,158 +1,152 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { Paper, Box } from '@mantine/core';
+import { useRef, useEffect, useState, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { Box, Text, Center, Stack, Badge, Loader } from '@mantine/core';
+import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef, useTransformEffect } from 'react-zoom-pan-pinch';
 import { useWindowStore } from '../../stores/windowStore';
 import { WindowItem } from '../../../shared/schemas';
 
-const ACI_COLORS: Record<number, string> = {
-  1: '#FF0000', 2: '#FFFF00', 3: '#00FF00', 4: '#00FFFF', 5: '#0000FF', 6: '#FF00FF', 
-  7: '#1A1B1E', 8: '#808080', 9: '#C0C0C0', 256: '#1A1B1E', 0: '#1A1B1E'
-};
-
 interface DxfViewerProps {
-  dxfData: { entities: any[], layers: any } | null;
+  processedResult: {
+    pathChunks: { color: string; paths: Path2D[] }[];
+    bounds: any;
+    totalEntities: number;
+  } | null;
   windows: WindowItem[];
 }
 
-export const DxfViewer = ({ dxfData, windows }: DxfViewerProps) => {
+export interface DxfViewerRef {
+  reset: () => void;
+  zoomToWindow: (window: WindowItem) => void;
+}
+
+export const DxfViewer = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResult, windows }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const transformRef = useRef<ReactZoomPanPinchRef>(null);
+  const lastStateRef = useRef<any>(null);
+  const requestRef = useRef<number | undefined>(undefined);
+
   const { activeWindowId } = useWindowStore();
 
-  const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
-
-  // 1. 数据预处理
-  const colorGroups = useMemo(() => {
-    if (!dxfData) return null;
-    const { entities, layers } = dxfData;
-    const groups: Record<string, any[]> = {};
-
-    entities.forEach(entity => {
-      let colorIndex = entity.colorIndex;
-      if (!colorIndex || colorIndex === 256) {
-        const layer = layers[entity.layer];
-        colorIndex = layer?.colorIndex || 7;
-      }
-      const hex = ACI_COLORS[colorIndex] || '#333333';
-      if (!groups[hex]) groups[hex] = [];
-      groups[hex].push(entity);
-    });
-    return groups;
-  }, [dxfData]);
-
-  // 2. 核心绘图
-  const draw = useCallback(() => {
+  const draw = useCallback((state: { scale: number; positionX: number; positionY: number }) => {
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container || !colorGroups) return;
-
-    const ctx = canvas.getContext('2d');
+    if (!canvas || !processedResult) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const rect = container.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
+    const w = canvas.clientWidth * dpr; const h = canvas.clientHeight * dpr;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+    }
 
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, w, h);
+    const { scale, positionX: px, positionY: py } = state;
+
     ctx.save();
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.scale(camera.zoom * dpr, -camera.zoom * dpr);
-    ctx.translate(camera.x, camera.y);
+    ctx.translate(px * dpr + w/2, py * dpr + h/2);
+    ctx.scale(scale * dpr, scale * dpr);
 
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    // 1. 分片绘制底图
+    ctx.lineWidth = 1.0 / scale; 
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
-    // 绘制底图
-    Object.entries(colorGroups).forEach(([hex, entities]) => {
-      ctx.beginPath();
-      ctx.strokeStyle = hex;
-      ctx.lineWidth = 1.0 / (camera.zoom * dpr);
-      entities.forEach(e => {
-        if (e.type === 'LINE') {
-          ctx.moveTo(e.vertices[0].x, e.vertices[0].y);
-          ctx.lineTo(e.vertices[1].x, e.vertices[1].y);
-        } else if (e.type === 'LWPOLYLINE' || e.type === 'POLYLINE') {
-          e.vertices.forEach((v: any, i: number) => {
-            if (i === 0) ctx.moveTo(v.x, v.y); else ctx.lineTo(v.x, v.y);
-          });
-          if (e.shape) ctx.closePath();
-        }
+    processedResult.pathChunks.forEach(chunk => {
+      ctx.strokeStyle = chunk.color;
+      chunk.paths.forEach(p => {
+        ctx.stroke(p);
       });
-      ctx.stroke();
     });
 
-    // 绘制窗户
-    windows.forEach(win => {
+    // 2. 绘制窗户
+    windows.forEach((win, idx) => {
       const isActive = win.id === activeWindowId;
+      const pts = win.points;
+      if (!pts || pts.length === 0) return;
+
       ctx.beginPath();
-      ctx.strokeStyle = isActive ? '#228BE6' : '#F76707'; // 橙色显示识别出的图形
-      ctx.lineWidth = (isActive ? 5.0 : 2.5) / (camera.zoom * dpr);
-      win.points.forEach((p, i) => {
-        if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-      });
+      ctx.moveTo(pts[0].x, -pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, -pts[i].y);
       ctx.closePath();
+
+      ctx.fillStyle = isActive ? 'rgba(0, 122, 255, 0.5)' : 'rgba(255, 149, 0, 0.25)';
+      ctx.fill();
+      ctx.strokeStyle = isActive ? '#007AFF' : '#FF9500';
+      ctx.lineWidth = (isActive ? 8 : 4) / scale;
       ctx.stroke();
+
+      if (scale > 0.001) {
+        const cx = pts.reduce((a, b) => a + b.x, 0) / pts.length;
+        const cy = pts.reduce((a, b) => a + b.y, 0) / pts.length;
+        ctx.save();
+        ctx.translate(cx, -cy); ctx.scale(1/scale, 1/scale);
+        ctx.fillStyle = isActive ? '#007AFF' : '#FF9500';
+        ctx.beginPath(); ctx.arc(0, 0, 14 * dpr, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = `bold ${12 * dpr}px sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`${idx + 1}`, 0, 0);
+        ctx.restore();
+      }
     });
 
     ctx.restore();
-  }, [colorGroups, windows, activeWindowId, camera]);
+  }, [processedResult, windows, activeWindowId]);
 
-  // 初始视野计算
-  useEffect(() => {
-    if (dxfData?.entities.length) {
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      dxfData.entities.forEach(e => {
-        const pts = e.vertices || (e.center ? [{x: e.center.x - e.radius, y: e.center.y - e.radius}, {x: e.center.x + e.radius, y: e.center.y + e.radius}] : []);
-        pts.forEach((v: any) => {
-          minX = Math.min(minX, v.x); maxX = Math.max(maxX, v.x);
-          minY = Math.min(minY, v.y); maxY = Math.max(maxY, v.y);
+  const zoomToFit = useCallback(() => {
+    if (!processedResult?.bounds || !transformRef.current || !containerRef.current) return;
+    const { bounds } = processedResult;
+    const rect = containerRef.current.getBoundingClientRect();
+    const scale = Math.min((rect.width - 100) / bounds.width, (rect.height - 100) / bounds.height) || 1;
+    transformRef.current.setTransform(0, 0, scale, 0);
+  }, [processedResult]);
+
+  useImperativeHandle(ref, () => ({ 
+    reset: zoomToFit, 
+    zoomToWindow: (win: WindowItem) => {
+      if (!transformRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const pts = win.points;
+      const cx = pts.reduce((a, b) => a + b.x, 0) / pts.length;
+      const cy = pts.reduce((a, b) => a + b.y, 0) / pts.length;
+      const targetScale = 0.05; 
+      transformRef.current.setTransform(-cx * targetScale, cy * targetScale, targetScale, 500);
+    }
+  }));
+
+  useEffect(() => { if (processedResult) setTimeout(zoomToFit, 100); }, [processedResult, zoomToFit]);
+
+  const DrawingLayer = () => {
+    useTransformEffect(({ state }) => {
+      lastStateRef.current = state;
+      if (requestRef.current === undefined) {
+        requestRef.current = requestAnimationFrame(() => {
+          if (lastStateRef.current) draw(lastStateRef.current);
+          requestRef.current = undefined;
         });
-      });
-      if (minX !== Infinity) {
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (rect) {
-          const zoom = Math.min((rect.width - 100) / (maxX - minX), (rect.height - 100) / (maxY - minY));
-          setCamera({ x: -(minX + maxX) / 2, y: -(minY + maxY) / 2, zoom: zoom || 1 });
-        }
       }
-    }
-  }, [dxfData]);
-
-  const handleWheel = (e: React.WheelEvent) => {
-    const factor = -e.deltaY > 0 ? 1.15 : 0.85;
-    setCamera(prev => ({ ...prev, zoom: Math.max(0.0001, Math.min(prev.zoom * factor, 5000)) }));
+    });
+    return <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block', cursor: 'crosshair' }} />;
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 0 || e.button === 1) {
-      setIsDragging(true);
-      setLastMouse({ x: e.clientX, y: e.clientY });
-    }
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
-    const dx = (e.clientX - lastMouse.x) / camera.zoom;
-    const dy = -(e.clientY - lastMouse.y) / camera.zoom;
-    setCamera(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
-    setLastMouse({ x: e.clientX, y: e.clientY });
-  };
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
-  }, [draw]);
+  if (!processedResult) return <Center h="100%"><Loader /></Center>;
 
   return (
-    <Paper ref={containerRef} withBorder style={{ width: '100%', height: '100%', overflow: 'hidden', cursor: isDragging ? 'grabbing' : 'crosshair' }}
-      onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={() => setIsDragging(false)} onMouseLeave={() => setIsDragging(false)}>
-      <canvas ref={canvasRef} style={{ display: 'block' }} />
+    <Box ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: '#fff', position: 'relative' }}>
+      <TransformWrapper 
+        ref={transformRef} 
+        minScale={0.000000001} 
+        maxScale={100} 
+        centerOnInit={false}
+        pinch={{ step: 25 }} wheel={{ step: 1.2 }} 
+      >
+        <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }} contentStyle={{ width: '100%', height: '100%' }}>
+           <DrawingLayer />
+        </TransformComponent>
+      </TransformWrapper>
+      <Box style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 10, pointerEvents: 'none' }}>
+        <Badge color="blue" size="xs">Entities: {processedResult.totalEntities}</Badge>
+      </Box>
     </Paper>
   );
-};
+});
+
+import { Paper } from '@mantine/core';

@@ -1,88 +1,91 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { WindowItem, WindowResponseSchema } from '../../shared/schemas';
+import { WindowItem, WindowResponseSchema, DrawingItem, DrawingResponseSchema } from '../../shared/schemas';
 
-// 设置基础端口，生产环境应通过 preload 传递
-let API_BASE = 'http://localhost:3002/api';
+let API_BASE = 'http://localhost:6002/api';
 
-// 在浏览器环境下，尝试从全局变量中动态获取端口 (如果已注入)
 if (typeof window !== 'undefined' && (window as any).API_PORT) {
   API_BASE = `http://localhost:${(window as any).API_PORT}/api`;
 }
 
-export const useWindows = () => {
+// --- Drawings ---
+export const useDrawings = () => {
   return useQuery({
-    queryKey: ['windows'],
-    queryFn: async (): Promise<WindowItem[]> => {
-      const res = await fetch(`${API_BASE}/windows`);
+    queryKey: ['drawings'],
+    queryFn: async (): Promise<DrawingItem[]> => {
+      const res = await fetch(`${API_BASE}/drawings`);
       const json = await res.json();
-      const validated = WindowResponseSchema.parse(json);
-      return (validated.data as WindowItem[]) || [];
+      return json.data || [];
     },
   });
 };
 
-export const useCreateWindow = () => {
+export const useCreateDrawing = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (newWindow: Omit<WindowItem, 'id' | 'createdAt'>) => {
-      const res = await fetch(`${API_BASE}/windows`, {
+    mutationFn: async (data: { title: string, fileName: string, windows: Omit<WindowItem, 'id' | 'drawingId' | 'createdAt'>[] }) => {
+      const res = await fetch(`${API_BASE}/drawings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newWindow),
-      });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['windows'] });
-    },
-  });
-};
-
-export const useBatchCreateWindows = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (windows: Omit<WindowItem, 'id' | 'createdAt'>[]) => {
-      const res = await fetch(`${API_BASE}/windows/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(windows),
-      });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['windows'] });
-    },
-  });
-};
-
-export const useUpdateWindow = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<WindowItem> }) => {
-      const res = await fetch(`${API_BASE}/windows/${id}`, {
-        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['windows'] });
+      queryClient.invalidateQueries({ queryKey: ['drawings'] });
     },
   });
 };
 
-export const useDeleteWindow = () => {
+export const useDrawingWindows = (drawingId: string | null) => {
+  return useQuery({
+    queryKey: ['drawings', drawingId, 'windows'],
+    queryFn: async (): Promise<WindowItem[]> => {
+      if (!drawingId) return [];
+      const res = await fetch(`${API_BASE}/drawings/${drawingId}/windows`);
+      const json = await res.json();
+      return json.data || [];
+    },
+    enabled: !!drawingId,
+  });
+};
+
+export const useDeleteDrawing = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`${API_BASE}/windows/${id}`, {
-        method: 'DELETE',
-      });
-      return res.json();
+      await fetch(`${API_BASE}/drawings/${id}`, { method: 'DELETE' });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['windows'] });
+      queryClient.invalidateQueries({ queryKey: ['drawings'] });
+    },
+  });
+};
+
+// --- Windows ---
+export const useUpdateWindow = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<WindowItem> }) => {
+      await fetch(`${API_BASE}/windows/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['drawings'] });
+    },
+  });
+};
+
+export const useClearData = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await fetch(`${API_BASE}/windows/all`, { method: 'DELETE' });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['drawings'] });
     },
   });
 };
