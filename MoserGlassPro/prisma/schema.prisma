@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./glass_pro.db"
+}
+
+model Category {
+  id           Int         @id @default(autoincrement())
+  name         String
+  type         String      // 'BASIC' or 'ACCESSORY'
+  parentId     Int?
+  isRepeatable Boolean     @default(false)
+  unitType     String      // 'SQM' (平米), 'LINEAR' (延米), 'PIECE' (件), 'BOTTLE' (瓶)
+  
+  parent       Category?   @relation("CategoryToSub", fields: [parentId], references: [id])
+  children     Category[]  @relation("CategoryToSub")
+  components   Component[]
+
+  @@unique([name, parentId])
+}
+
+model Component {
+  id            Int      @id @default(autoincrement())
+  categoryId    Int
+  name          String
+  agencyPrice   Float    @default(0)
+  retailPrice   Float    @default(0)
+  unitType      String?  // 可选，覆盖分类的 unitType
+  
+  category      Category @relation(fields: [categoryId], references: [id])
+  
+  combinationComponents CombinationComponent[]
+  calculationDetails    CalculationDetail[]
+}
+
+model Shape {
+  id               Int      @id @default(autoincrement())
+  name             String   @unique
+  formulaArea      String   // 面积计算公式，例如 "w * h"
+  formulaPerimeter String   // 周长计算公式，例如 "2 * (w + h)"
+  parameters       String   // JSON string, e.g. ["w", "h", "r"]
+  image            String?  // 形状示意图路径
+}
+
+model Combination {
+  id            Int      @id @default(autoincrement())
+  name          String
+  hash          String   @unique // 用于检测已有组合
+  agencyPrice   Float    @default(0)
+  retailPrice   Float    @default(0)
+  createdAt     DateTime @default(now())
+  
+  components    CombinationComponent[]
+  records       CalculationRecord[]
+}
+
+model CombinationComponent {
+  id            Int         @id @default(autoincrement())
+  combinationId Int
+  componentId   Int
+  quantity      Float       @default(1)
+  
+  combination   Combination @relation(fields: [combinationId], references: [id])
+  component     Component   @relation(fields: [componentId], references: [id])
+}
+
+model ExtraRate {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  percentage Float    @default(0)
+  isActive   Boolean  @default(true)
+}
+
+model CalculationRecord {
+  id                Int      @id @default(autoincrement())
+  name              String?
+  combinationId     Int?
+  shapeName         String?
+  params            String   // JSON string of input params (w, h, etc.)
+  totalPrice        Float
+  agencyTotalPrice  Float
+  retailTotalPrice  Float
+  details           String   // JSON string of detailed breakdown
+  createdAt         DateTime @default(now())
+
+  combination       Combination? @relation(fields: [combinationId], references: [id])
+  calculationDetails CalculationDetail[]
+}
+
+model CalculationDetail {
+  id          Int      @id @default(autoincrement())
+  recordId    Int
+  componentId Int
+  name        String
+  quantity    Float
+  unitPrice   Float
+  subTotal    Float
+
+  record      CalculationRecord @relation(fields: [recordId], references: [id])
+  component   Component         @relation(fields: [componentId], references: [id])
+}

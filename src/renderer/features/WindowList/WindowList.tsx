@@ -1,10 +1,11 @@
 import { Paper, Stack, Text, Badge, Group, ActionIcon, Collapse, Divider, Box, Grid, ThemeIcon } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconTrash, IconEdit, IconChevronDown, IconChevronUp, IconFocus, IconDimensions, IconBookmark } from '@tabler/icons-react';
-import { useMemo, memo } from 'react';
+import { useMemo, memo, useRef } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { WindowItem } from '../../../shared/schemas';
 import { useWindowStore, formatUnit, getUnitSymbol, getAreaSymbol } from '../../stores/windowStore';
+import { useShallow } from 'zustand/react/shallow';
 
 interface WindowListProps {
   windows: WindowItem[];
@@ -37,7 +38,7 @@ export const WindowList = ({ windows, onDelete, onEdit, onFocus }: WindowListPro
   }
 
   return (
-    <Box style={{ height: 'calc(100vh - 110px)' }}>
+    <Box style={{ height: '100%' }}>
       <Virtuoso
         style={{ height: '100%' }}
         data={groupedWindows}
@@ -63,9 +64,14 @@ const DataTag = memo(({ label, value, unit, color = "gray" }: { label: string; v
 
 const WindowGroupCard = memo(({ group, onDelete, onEdit, onFocus }: { group: any, onDelete: any, onEdit: any, onFocus?: any }) => {
   const [opened, { toggle }] = useDisclosure(false);
-  const { unit, setActiveWindowId, activeWindowId } = useWindowStore();
+  const { unit, setActiveWindowId, activeWindowId } = useWindowStore(useShallow((state) => ({
+    unit: state.unit,
+    setActiveWindowId: state.setActiveWindowId,
+    activeWindowId: state.activeWindowId,
+  })));
   const unitSym = getUnitSymbol(unit);
   const areaSym = getAreaSymbol(unit);
+  const lastFocusRef = useRef<{ id: string; at: number } | null>(null);
 
   const isSample = group.items[0]?.category === "参考大样";
   const isSelected = useMemo(() => group.items.some((i:any) => i.id === activeWindowId), [group.items, activeWindowId]);
@@ -116,6 +122,7 @@ const WindowGroupCard = memo(({ group, onDelete, onEdit, onFocus }: { group: any
                 setActiveWindowId={setActiveWindowId}
                 onFocus={onFocus}
                 onEdit={onEdit}
+                lastFocusRef={lastFocusRef}
               />
             ))}
           </Stack>
@@ -125,7 +132,7 @@ const WindowGroupCard = memo(({ group, onDelete, onEdit, onFocus }: { group: any
   );
 });
 
-const WindowItemCard = memo(({ win, idx, unit, unitSym, areaSym, activeWindowId, setActiveWindowId, onFocus, onEdit }: any) => (
+const WindowItemCard = memo(({ win, idx, unit, unitSym, areaSym, activeWindowId, setActiveWindowId, onFocus, onEdit, lastFocusRef }: any) => (
   <Paper 
     p="xs" 
     withBorder
@@ -135,13 +142,28 @@ const WindowItemCard = memo(({ win, idx, unit, unitSym, areaSym, activeWindowId,
       borderColor: activeWindowId === win.id ? 'var(--mantine-color-blue-3)' : '#eee',
       cursor: 'pointer'
     }}
-    onClick={(e) => { e.stopPropagation(); setActiveWindowId(win.id || ''); onFocus?.(win); }}
+    onClick={(e) => {
+      e.stopPropagation();
+      const focusId = win.id || '';
+      const now = Date.now();
+      if (lastFocusRef?.current?.id === focusId && now - lastFocusRef.current.at < 250) return;
+      lastFocusRef.current = { id: focusId, at: now };
+      setActiveWindowId(focusId);
+      onFocus?.(win);
+    }}
   >
     <Stack gap={6}>
       <Group justify="space-between" wrap="nowrap">
         <Text size="xs" fw={700} truncate>#{idx + 1} {win.name}</Text>
         <Group gap={4}>
-          <ActionIcon size="sm" variant="subtle" onClick={(e) => { e.stopPropagation(); onFocus?.(win); }}><IconFocus size={14} /></ActionIcon>
+          <ActionIcon size="sm" variant="subtle" onClick={(e) => {
+            e.stopPropagation();
+            const focusId = win.id || '';
+            const now = Date.now();
+            if (lastFocusRef?.current?.id === focusId && now - lastFocusRef.current.at < 250) return;
+            lastFocusRef.current = { id: focusId, at: now };
+            onFocus?.(win);
+          }}><IconFocus size={14} /></ActionIcon>
           <ActionIcon size="sm" variant="subtle" color="blue" onClick={(e) => { e.stopPropagation(); onEdit(win); }}><IconEdit size={14} /></ActionIcon>
         </Group>
       </Group>

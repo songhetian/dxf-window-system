@@ -1,6 +1,15 @@
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
-import { WindowItem, DrawingItem } from '../../shared/schemas';
+import {
+  WindowItem,
+  DrawingItem,
+  MaterialCategory,
+  MaterialPricingMode,
+  MaterialItem,
+  PricingProduct,
+  PricingRate,
+  PricingQuote,
+} from '../../shared/schemas';
 import fs from 'fs';
 import path from 'path';
 
@@ -8,10 +17,18 @@ interface DatabaseSchema {
   windows: WindowItem;
   drawings: DrawingItem;
   standards: any;
+  material_categories: MaterialCategory;
+  material_pricing_modes: MaterialPricingMode;
+  materials: MaterialItem;
+  pricing_products: Omit<PricingProduct, 'items'>;
+  pricing_product_items: any;
+  pricing_rates: PricingRate;
+  pricing_quotes: Omit<PricingQuote, 'details'> & { details: string };
 }
 
 export const initDb = (dbPath: string) => {
   const db = new Database(dbPath);
+  db.pragma('foreign_keys = ON');
   
   // 始终尝试运行 CREATE TABLE IF NOT EXISTS 语句，以支持版本升级
   try {
@@ -39,6 +56,46 @@ export const initDb = (dbPath: string) => {
     }
   } catch (err) {
     console.error('Failed to update database schema:', err);
+  }
+
+  try {
+    const hasColumn = (table: string, column: string) => {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      return columns.some((item) => item.name === column);
+    };
+
+    if (!hasColumn('materials', 'updatedAt')) {
+      db.exec(`ALTER TABLE materials ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    }
+    if (!hasColumn('material_categories', 'allowMultipleInProduct')) {
+      db.exec(`ALTER TABLE material_categories ADD COLUMN allowMultipleInProduct INTEGER DEFAULT 0`);
+    }
+    if (!hasColumn('pricing_products', 'updatedAt')) {
+      db.exec(`ALTER TABLE pricing_products ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    }
+    if (!hasColumn('pricing_product_items', 'calcMode')) {
+      db.exec(`ALTER TABLE pricing_product_items ADD COLUMN calcMode TEXT DEFAULT 'area'`);
+    }
+    if (!hasColumn('pricing_product_items', 'sortOrder')) {
+      db.exec(`ALTER TABLE pricing_product_items ADD COLUMN sortOrder INTEGER DEFAULT 0`);
+    }
+    if (!hasColumn('standards', 'minWindowArea')) {
+      db.exec(`ALTER TABLE standards ADD COLUMN minWindowArea REAL DEFAULT 0.08`);
+    }
+    if (!hasColumn('standards', 'minSideLength')) {
+      db.exec(`ALTER TABLE standards ADD COLUMN minSideLength REAL DEFAULT 180`);
+    }
+    if (!hasColumn('standards', 'labelMaxDistance')) {
+      db.exec(`ALTER TABLE standards ADD COLUMN labelMaxDistance REAL DEFAULT 600`);
+    }
+    if (!hasColumn('standards', 'layerIncludeKeywords')) {
+      db.exec(`ALTER TABLE standards ADD COLUMN layerIncludeKeywords TEXT DEFAULT '窗,window,win'`);
+    }
+    if (!hasColumn('standards', 'layerExcludeKeywords')) {
+      db.exec(`ALTER TABLE standards ADD COLUMN layerExcludeKeywords TEXT DEFAULT '标注,text,dim,轴网,图框,title'`);
+    }
+  } catch (err) {
+    console.error('Failed to ensure migrated columns:', err);
   }
 
   return new Kysely<DatabaseSchema>({

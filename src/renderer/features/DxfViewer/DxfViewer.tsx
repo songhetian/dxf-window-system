@@ -1,77 +1,118 @@
-import { useRef, useEffect, useState, useCallback, useMemo, forwardRef, useImperativeHandle, memo } from 'react';
-import { Box, Text, Center, Stack, Badge, Loader, Paper } from '@mantine/core';
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, memo } from 'react';
+import { Box, Center, Stack, Badge, Loader } from '@mantine/core';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef, useTransformEffect } from 'react-zoom-pan-pinch';
 import { useWindowStore } from '../../stores/windowStore';
 import { WindowItem } from '../../../shared/schemas';
+import { useShallow } from 'zustand/react/shallow';
+
+type RecognitionMarker = { text: string; x: number; y: number; layer: string };
+type RecognitionSummary = {
+  totalLabels: number;
+  matchedLabels: number;
+  unmatchedLabels: string[];
+  unmatchedLabelMarkers: RecognitionMarker[];
+  includedLayers: string[];
+  excludedLayers: string[];
+  excludedLayerDetails: Array<{ layer: string; entityCount: number; labelCount: number }>;
+  activeEntityLayers: string[];
+  activeLabelLayers: string[];
+};
 
 interface DxfViewerProps {
   processedResult: {
     pathChunks: { color: string; paths: Path2D[] }[];
-    textMarkers?: { text: string; x: number; y: number }[];
+    textMarkers?: RecognitionMarker[];
     bounds: any;
     totalEntities: number;
+    recognitionSummary?: RecognitionSummary;
   } | null;
   windows: WindowItem[];
+  focusedMarker?: RecognitionMarker | null;
 }
 
 export interface DxfViewerRef {
   reset: () => void;
   zoomToWindow: (window: WindowItem) => void;
+  zoomToMarker: (marker: RecognitionMarker) => void;
 }
 
-export const DxfViewer = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResult, windows }, ref) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+const DxfViewerInner = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResult, windows, focusedMarker = null }, ref) => {
+  const baseCanvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
   const lastStateRef = useRef<any>(null);
   const requestRef = useRef<number | undefined>(undefined);
 
-  const { activeWindowId } = useWindowStore();
+  const { activeWindowId } = useWindowStore(useShallow((state) => ({
+    activeWindowId: state.activeWindowId,
+  })));
 
-  const draw = useCallback((state: { scale: number; positionX: number; positionY: number }) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !processedResult) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) return;
-
+  const prepareCanvas = (canvas: HTMLCanvasElement | null, alpha = false) => {
+    if (!canvas) return null;
     const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth * dpr; const h = canvas.clientHeight * dpr;
+    const w = canvas.clientWidth * dpr;
+    const h = canvas.clientHeight * dpr;
     if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w; canvas.height = h;
+      canvas.width = w;
+      canvas.height = h;
     }
+    const ctx = canvas.getContext('2d', { alpha });
+    if (!ctx) return null;
+    return { ctx, dpr, w, h };
+  };
 
-    // 清空背景
-    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, w, h);
+  const drawBase = useCallback((state: { scale: number; positionX: number; positionY: number }) => {
+    const prepared = prepareCanvas(baseCanvasRef.current);
+    if (!prepared || !processedResult) return;
+    const { ctx, dpr, w, h } = prepared;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, w, h);
     if (!processedResult.pathChunks || processedResult.pathChunks.length === 0) return;
 
     const { scale, positionX: px, positionY: py } = state;
     if (isNaN(scale) || isNaN(px) || isNaN(py)) return;
 
     ctx.save();
-    // 核心修复：直接应用缩放库的偏移和比例
-    // 此时 Canvas 的 (0,0) 就是图纸解析时的中心点 (centerX, centerY)
-    ctx.translate(px * dpr, py * dpr); 
+    ctx.translate(px * dpr, py * dpr);
     ctx.scale(scale * dpr, scale * dpr);
-    
-    // 1. 绘制底图 (原样输出：包含所有线条、虚线等)
-    ctx.lineWidth = 1.0 / scale; 
-    ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+    ctx.lineWidth = 1.0 / scale;
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
 
-    processedResult.pathChunks.forEach(chunk => {
+    processedResult.pathChunks.forEach((chunk) => {
       ctx.strokeStyle = chunk.color;
-      chunk.paths.forEach(p => ctx.stroke(p));
+      chunk.paths.forEach((path) => ctx.stroke(path));
     });
 
-    // 2. 绘制原图文字标注
-    if (processedResult.textMarkers && scale > 0.002) {
+    // 只在足够放大时绘制少量原图文字，避免识别完成后首帧卡住。
+    if (processedResult.textMarkers && scale > 0.01) {
+      const visibleTextMarkers = processedResult.textMarkers.length > 600
+        ? processedResult.textMarkers.slice(0, 600)
+        : processedResult.textMarkers;
       ctx.fillStyle = '#444444';
       ctx.font = `${11 / scale}px sans-serif`;
-      processedResult.textMarkers.forEach(tm => {
+      visibleTextMarkers.forEach((tm) => {
         ctx.fillText(tm.text, tm.x, -tm.y);
       });
     }
 
-    // 3. 绘制识别出的窗户高亮层 (不再填充，仅显示细边框)
+    ctx.restore();
+  }, [processedResult]);
+
+  const drawOverlay = useCallback((state: { scale: number; positionX: number; positionY: number }) => {
+    const prepared = prepareCanvas(overlayCanvasRef.current, true);
+    if (!prepared || !processedResult) return;
+    const { ctx, dpr, w, h } = prepared;
+    ctx.clearRect(0, 0, w, h);
+
+    const { scale, positionX: px, positionY: py } = state;
+    if (isNaN(scale) || isNaN(px) || isNaN(py)) return;
+
+    ctx.save();
+    ctx.translate(px * dpr, py * dpr);
+    ctx.scale(scale * dpr, scale * dpr);
+
     windows.forEach((win) => {
       const isActive = win.id === activeWindowId;
       const pts = win.points;
@@ -90,8 +131,35 @@ export const DxfViewer = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedRe
       ctx.stroke();
     });
 
+    if (focusedMarker) {
+      const x = focusedMarker.x;
+      const y = -focusedMarker.y;
+      const radius = 120 / scale;
+
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 59, 48, 0.14)';
+      ctx.fill();
+      ctx.strokeStyle = '#FF3B30';
+      ctx.lineWidth = 3 / scale;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x - radius * 0.55, y);
+      ctx.lineTo(x + radius * 0.55, y);
+      ctx.moveTo(x, y - radius * 0.55);
+      ctx.lineTo(x, y + radius * 0.55);
+      ctx.strokeStyle = '#FF3B30';
+      ctx.lineWidth = 2 / scale;
+      ctx.stroke();
+
+      ctx.fillStyle = '#FF3B30';
+      ctx.font = `bold ${13 / scale}px sans-serif`;
+      ctx.fillText(focusedMarker.text, x + radius * 0.7, y - radius * 0.7);
+    }
+
     ctx.restore();
-  }, [processedResult, windows, activeWindowId]);
+  }, [processedResult, windows, activeWindowId, focusedMarker]);
 
   const zoomToFit = useCallback(() => {
     if (!processedResult?.bounds || !transformRef.current || !containerRef.current) return;
@@ -110,8 +178,9 @@ export const DxfViewer = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedRe
     
     transformRef.current.setTransform(initialX, initialY, scale, 0);
     // 立即手动触发一次重绘，确保不闪烁
-    draw({ scale, positionX: initialX, positionY: initialY });
-  }, [processedResult, draw]);
+    drawBase({ scale, positionX: initialX, positionY: initialY });
+    drawOverlay({ scale, positionX: initialX, positionY: initialY });
+  }, [processedResult, drawBase, drawOverlay]);
 
   useImperativeHandle(ref, () => ({ 
     reset: zoomToFit, 
@@ -127,22 +196,56 @@ export const DxfViewer = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedRe
       const py = rect.height / 2 + cy * targetScale;
       
       transformRef.current.setTransform(px, py, targetScale, 500);
-    }
+    },
+    zoomToMarker: (marker: RecognitionMarker) => {
+      if (!transformRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const targetScale = 0.12;
+      const px = rect.width / 2 - marker.x * targetScale;
+      const py = rect.height / 2 + marker.y * targetScale;
+
+      transformRef.current.setTransform(px, py, targetScale, 500);
+    },
   }));
 
   useEffect(() => { if (processedResult) setTimeout(zoomToFit, 100); }, [processedResult, zoomToFit]);
+  useEffect(() => {
+    if (!lastStateRef.current) return;
+    drawOverlay(lastStateRef.current);
+  }, [drawOverlay]);
+  useEffect(() => {
+    if (!focusedMarker) return;
+    const timeoutId = window.setTimeout(() => {
+      if (focusedMarker) {
+        const rect = containerRef.current?.getBoundingClientRect();
+        const targetScale = rect ? Math.min(Math.max(rect.width / 4000, 0.05), 0.2) : 0.12;
+        const px = (rect?.width || 0) / 2 - focusedMarker.x * targetScale;
+        const py = (rect?.height || 0) / 2 + focusedMarker.y * targetScale;
+        transformRef.current?.setTransform(px, py, targetScale, 500);
+      }
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [focusedMarker]);
 
   const DrawingLayer = () => {
     useTransformEffect(({ state }) => {
       lastStateRef.current = state;
       if (requestRef.current === undefined) {
         requestRef.current = requestAnimationFrame(() => {
-          if (lastStateRef.current) draw(lastStateRef.current);
+          if (lastStateRef.current) {
+            drawBase(lastStateRef.current);
+            drawOverlay(lastStateRef.current);
+          }
           requestRef.current = undefined;
         });
       }
     });
-    return <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />;
+    return (
+      <>
+        <canvas ref={baseCanvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+        <canvas ref={overlayCanvasRef} style={{ width: '100%', height: '100%', display: 'block', position: 'absolute', inset: 0 }} />
+      </>
+    );
   };
 
   if (!processedResult) return <Center h="100%"><Loader /></Center>;
@@ -169,8 +272,19 @@ export const DxfViewer = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedRe
         </Box>
       </TransformWrapper>
       <Box style={{ position: 'absolute', bottom: 10, right: 10, zIndex: 10, pointerEvents: 'none' }}>
-        <Badge color="blue" size="xs">Entities: {processedResult.totalEntities}</Badge>
+        <Stack gap={6} align="flex-end">
+          <Badge color="blue" size="xs">Entities: {processedResult.totalEntities}</Badge>
+          {processedResult.recognitionSummary ? (
+            <Badge color={processedResult.recognitionSummary.unmatchedLabels.length > 0 ? 'yellow' : 'teal'} size="xs">
+              Labels: {processedResult.recognitionSummary.matchedLabels}/{processedResult.recognitionSummary.totalLabels}
+            </Badge>
+          ) : null}
+        </Stack>
       </Box>
     </Box>
   );
 });
+
+DxfViewerInner.displayName = 'DxfViewer';
+
+export const DxfViewer = memo(DxfViewerInner);

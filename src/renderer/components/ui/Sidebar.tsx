@@ -1,71 +1,72 @@
-import { NavLink, Stack, Tooltip, ActionIcon, Box, useMantineTheme } from '@mantine/core';
-import { IconFileCode, IconHistory, IconSettings, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from '@tabler/icons-react';
+import { Box, NavLink, Stack, Text } from '@mantine/core';
+import {
+  IconFileCode,
+  IconHistory,
+  IconLayoutGrid,
+  IconListSearch,
+  IconPackage,
+  IconRulerMeasure,
+  IconCalculator,
+  IconPercentage,
+} from '@tabler/icons-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+
+const items = [
+  { path: '/', label: '图纸识别', icon: IconFileCode },
+  { path: '/materials', label: '材料库', icon: IconListSearch },
+  { path: '/products', label: '组合设置', icon: IconPackage },
+  { path: '/product-library', label: '组合库', icon: IconLayoutGrid },
+  { path: '/pricing', label: '报价中心', icon: IconCalculator },
+  { path: '/rates', label: '费率设置', icon: IconPercentage },
+  { path: '/records', label: '记录中心', icon: IconHistory },
+  { path: '/standards', label: '识别标准', icon: IconRulerMeasure },
+];
 
 export const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const [collapsed, setCollapsed] = useState(false);
-  const theme = useMantineTheme();
-
-  const menuItems = [
-    { icon: IconFileCode, label: '图纸解析', path: '/' },
-    { icon: IconHistory, label: '图纸记录', path: '/records' },
-    { icon: IconSettings, label: '识别标准', path: '/standards' },
-  ];
 
   return (
-    <Box
-      style={{
-        width: collapsed ? 60 : 200,
-        transition: 'width 0.2s ease',
-        borderRight: '1px solid #E9ECEF',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        background: '#fff',
-      }}
-    >
-      <Stack gap={0} p="xs" style={{ flex: 1 }}>
-        <Box mb="xl" pl={collapsed ? 0 : 'xs'} style={{ textAlign: collapsed ? 'center' : 'left' }}>
-           {!collapsed && <Box style={{ fontWeight: 800, fontSize: 18, color: theme.colors.blue[7] }}>DXF Pro</Box>}
-           {collapsed && <Box style={{ fontWeight: 800, fontSize: 14, color: theme.colors.blue[7] }}>D</Box>}
+    <Box w={220} p={12}>
+      <Box
+        className="no-drag"
+        h="100%"
+        style={{
+          border: '1px solid var(--border-color)',
+          borderRadius: 16,
+          background: '#fff',
+          boxShadow: 'var(--shadow-sm)',
+          overflow: 'hidden',
+        }}
+      >
+        <Box p={16} style={{ borderBottom: '1px solid var(--border-color)' }}>
+          <Text fw={800} size="lg">DXF Window</Text>
+          <Text size="sm" c="dimmed" mt={4}>
+            识别、报价、归档
+          </Text>
         </Box>
 
-        {menuItems.map((item) => (
-          <Tooltip key={item.path} label={item.label} position="right" disabled={!collapsed}>
+        <Stack gap={6} p={10}>
+          {items.map((item) => (
             <NavLink
-              label={collapsed ? '' : item.label}
-              leftSection={<item.icon size={20} stroke={1.5} />}
+              key={item.path}
+              label={item.label}
+              leftSection={<item.icon size={18} />}
               active={location.pathname === item.path}
               onClick={() => navigate(item.path)}
               variant="light"
               color="blue"
               styles={{
                 root: {
-                  borderRadius: theme.radius.sm,
-                  marginBottom: 4,
-                  height: 44,
-                }
+                  borderRadius: 10,
+                },
+                label: {
+                  fontWeight: 700,
+                },
               }}
             />
-          </Tooltip>
-        ))}
-      </Stack>
-
-      <Box p="xs" style={{ borderTop: '1px solid #F1F3F5' }}>
-        <Tooltip label={collapsed ? '展开侧边栏' : '折叠侧边栏'} position="right">
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            size="lg"
-            onClick={() => setCollapsed(!collapsed)}
-            style={{ width: '100%' }}
-          >
-            {collapsed ? <IconLayoutSidebarLeftExpand size={20} /> : <IconLayoutSidebarLeftCollapse size={20} />}
-          </ActionIcon>
-        </Tooltip>
+          ))}
+        </Stack>
       </Box>
     </Box>
   );

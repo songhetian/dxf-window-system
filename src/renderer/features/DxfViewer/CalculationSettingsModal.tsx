@@ -29,6 +29,11 @@ export const CalculationSettingsModal = ({ opened, onClose }: CalculationSetting
       windowPrefix: identRules.windowPrefix,
       windowPattern: identRules.windowPattern,
       wallAreaThreshold: identRules.wallAreaThreshold,
+      minWindowArea: identRules.minWindowArea,
+      minSideLength: identRules.minSideLength,
+      labelMaxDistance: identRules.labelMaxDistance,
+      layerIncludeKeywords: identRules.layerIncludeKeywords,
+      layerExcludeKeywords: identRules.layerExcludeKeywords,
     },
   });
 
@@ -53,15 +58,25 @@ export const CalculationSettingsModal = ({ opened, onClose }: CalculationSetting
       windowPrefix: values.windowPrefix,
       windowPattern: values.windowPattern,
       wallAreaThreshold: values.wallAreaThreshold,
+      minWindowArea: values.minWindowArea,
+      minSideLength: values.minSideLength,
+      labelMaxDistance: values.labelMaxDistance,
+      layerIncludeKeywords: values.layerIncludeKeywords,
+      layerExcludeKeywords: values.layerExcludeKeywords,
     });
 
     // 2. 同步到数据库
     if (selectedStandardId) {
       await updateStandardMutation.mutateAsync({
-        name: standards.find(s => s.id === selectedStandardId)?.name || '通用标准',
+        name: standards.find((s: any) => s.id === selectedStandardId)?.name || '通用标准',
         windowPattern: values.windowPattern,
         doorPattern: 'M\\d{4}',
         wallAreaThreshold: values.wallAreaThreshold,
+        minWindowArea: values.minWindowArea,
+        minSideLength: values.minSideLength,
+        labelMaxDistance: values.labelMaxDistance,
+        layerIncludeKeywords: values.layerIncludeKeywords,
+        layerExcludeKeywords: values.layerExcludeKeywords,
       });
     }
     
@@ -77,6 +92,11 @@ export const CalculationSettingsModal = ({ opened, onClose }: CalculationSetting
         windowPrefix: identRules.windowPrefix,
         windowPattern: identRules.windowPattern,
         wallAreaThreshold: identRules.wallAreaThreshold,
+        minWindowArea: identRules.minWindowArea,
+        minSideLength: identRules.minSideLength,
+        labelMaxDistance: identRules.labelMaxDistance,
+        layerIncludeKeywords: identRules.layerIncludeKeywords,
+        layerExcludeKeywords: identRules.layerExcludeKeywords,
       });
     }
   }, [opened, identRules, scaleFactor, profileWidth, unitWeight]);
@@ -110,7 +130,7 @@ export const CalculationSettingsModal = ({ opened, onClose }: CalculationSetting
             label="型材米重 (kg/m)"
             description="用于估算型材总重量"
             min={0}
-            precision={2}
+            decimalScale={2}
             step={0.1}
             {...form.getInputProps('unitWeight')}
           />
@@ -133,9 +153,45 @@ export const CalculationSettingsModal = ({ opened, onClose }: CalculationSetting
 
           <NumberInput
             label="墙体面积阈值 (㎡)"
-            description="超过此面积才算安装墙体"
+            description="超过该面积的闭合轮廓会被当成墙体包络"
             min={1}
             {...form.getInputProps('wallAreaThreshold')}
+          />
+
+          <NumberInput
+            label="最小窗面积 (㎡)"
+            description="太小的闭合框不参与识别"
+            min={0}
+            decimalScale={3}
+            {...form.getInputProps('minWindowArea')}
+          />
+
+          <NumberInput
+            label="最小边长 (mm)"
+            description="宽或高小于这个值的候选窗会被忽略"
+            min={0}
+            {...form.getInputProps('minSideLength')}
+          />
+
+          <NumberInput
+            label="编号最大匹配距离 (mm)"
+            description="编号文字在框外时，允许向周边多远做就近匹配"
+            min={0}
+            {...form.getInputProps('labelMaxDistance')}
+          />
+
+          <TextInput
+            label="优先识别的图层关键词"
+            description="多个用逗号隔开，例如：窗,window,win。填了以后会优先使用这些图层，若图里没有再回退。"
+            placeholder="窗,window,win"
+            {...form.getInputProps('layerIncludeKeywords')}
+          />
+
+          <TextInput
+            label="排除的图层关键词"
+            description="这些图层会直接跳过，适合填：标注,text,dim,轴网,图框,title"
+            placeholder="标注,text,dim,轴网,图框,title"
+            {...form.getInputProps('layerExcludeKeywords')}
           />
           
           <Group justify="flex-end" mt="xl">

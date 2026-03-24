@@ -1,0 +1,120 @@
+{
+  "name": "moserglasspro",
+  "version": "1.0.0",
+  "description": "价格系统桌面应用",
+  "type": "module",
+  "main": "dist-main/main/index.js",
+  "build": {
+    "appId": "com.moser.glass.pro",
+    "productName": "价格系统",
+    "copyright": "Copyright © 2026 Moser",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "价格系统"
+    },
+    "files": [
+      "dist/**/*",
+      "src/main/**/*",
+      "src/preload/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      "glass_pro.db",
+      "schema.sql",
+      "seed.sql",
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run vite:dev\" \"npm run main:watch\" \"npm run electron:start\"",
+    "vite:dev": "vite",
+    "main:watch": "tsc -p tsconfig.main.json -w",
+    "electron:start": "wait-on http://127.0.0.1:5000 && wait-on dist-main/main/index.js && electron .",
+    "lint": "tsc --noEmit",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "build": "vite build && tsc -p tsconfig.node.json && electron-builder"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@fastify/autoload": "^6.3.1",
+    "@fastify/cors": "^11.2.0",
+    "@mantine/core": "^8.3.15",
+    "@mantine/form": "^8.3.15",
+    "@mantine/hooks": "^8.3.15",
+    "@mantine/notifications": "^8.3.15",
+    "@prisma/client": "^6.19.2",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-switch": "^1.2.6",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@tabler/icons-react": "^3.38.0",
+    "@tanstack/react-query": "^5.90.20",
+    "better-sqlite3": "^11.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "dxf-parser": "^1.1.2",
+    "fastify": "^5.7.4",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.395.0",
+    "prisma": "^6.19.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-query": "^3.39.3",
+    "react-router-dom": "^7.13.1",
+    "tailwind-merge": "^2.6.1",
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.76",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.4.3",
+    "@commitlint/config-conventional": "^20.4.3",
+    "@electron/rebuild": "^3.6.0",
+    "@prisma/sdk": "^3.15.2",
+    "@types/node": "^25.2.3",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^9.2.1",
+    "electron": "^31.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.2",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.2.13",
+    "wait-on": "^9.0.3"
+  }
+}

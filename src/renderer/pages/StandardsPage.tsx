@@ -1,127 +1,222 @@
-import React, { useState, useMemo } from 'react';
-import { Box, Title, Text, Stack, Paper, Group, Button, TextInput, NumberInput, ActionIcon, Card, Badge, SegmentedControl, Divider, Alert, ScrollArea, Center, Loader } from '@mantine/core';
-import { IconPlus, IconTrash, IconCheck, IconEye, IconBulb } from '@tabler/icons-react';
-import { useStandards, useCreateStandard, useDeleteStandard } from '../hooks/useWindowApi';
-import { useWindowStore } from '../stores/windowStore';
+import React, { useState } from 'react';
+import {
+  ActionIcon,
+  Badge,
+  Box,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
+import { IconPlus, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 
+import { PageScaffold } from '../components/ui/PageScaffold';
+import { useCreateStandard, useDeleteStandard, useStandards, useUpdateStandard } from '../hooks/useWindowApi';
+import { useWindowStore } from '../stores/windowStore';
+import {
+  StandardEditorModal,
+  StandardFormValue,
+  buildPatternFromPrefixes,
+  defaultStandardForm,
+} from '../features/standards/StandardEditorModal';
+
+const extractPrefixLabel = (pattern: string) => {
+  const multiMatch = pattern.match(/^\^\(\?:([^)]+)\)/);
+  if (multiMatch) return multiMatch[1].replace(/\|/g, ',');
+
+  const singleMatch = pattern.match(/^\^?([A-Z]+)/i);
+  return singleMatch?.[1] || 'C';
+};
+
+const detectPatternMode = (pattern: string) => {
+  if (pattern.startsWith('.*')) return 'contains';
+  if (pattern.includes('\\d+') && !pattern.includes('\\d{4}')) return 'flexible';
+  return 'standard';
+};
+
+const describePatternMode = (pattern: string) => {
+  if (pattern.startsWith('.*')) return '只要包含开头';
+  if (pattern.includes('\\d+') && !pattern.includes('\\d{4}')) return '任意位数字';
+  return '固定4位数字';
+};
+
+
 const StandardsPage = () => {
-  const { data: standards = [], isLoading } = useStandards();
-  const createMutation = useCreateStandard();
-  const deleteMutation = useDeleteStandard();
-  const { selectedStandardId, setSelectedStandardId, setIdentRules } = useWindowStore();
-  
-  const [name, setName] = useState('');
-  const [prefix, setPrefix] = useState('C');
-  const [matchType, setMatchType] = useState('standard');
-  const [wallSize, setWallSize] = useState(10);
+  const { data: standards = [] } = useStandards();
+  const createStandard = useCreateStandard();
+  const deleteStandard = useDeleteStandard();
+  const updateStandard = useUpdateStandard();
+  const { selectedStandardId } = useWindowStore();
 
-  const generatedPattern = useMemo(() => {
-    const p = prefix.toUpperCase();
-    if (matchType === 'standard') return `${p}\\d{4}`;
-    if (matchType === 'flexible') return `${p}\\d+`;
-    return `.*${p}.*`;
-  }, [prefix, matchType]);
+  const [createOpened, setCreateOpened] = useState(false);
+  const [editingStandard, setEditingStandard] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState<StandardFormValue>(defaultStandardForm);
 
-  const examples = useMemo(() => {
-    const p = prefix.toUpperCase();
-    if (matchType === 'standard') return [`${p}1515`, `${p}0707`, `${p}1215`].join(', ');
-    if (matchType === 'flexible') return [`${p}1`, `${p}12345`].join(', ');
-    return [`W-${p}-01`, `TYPE-${p}`].join(', ');
-  }, [prefix, matchType]);
-
-  const handleCreate = async () => {
-    if (!name) {
-      notifications.show({ title: '请输入名称', message: '请给这个规则起个名字', color: 'red' });
+  const handleCreateSubmit = async (createForm: StandardFormValue) => {
+    if (!createForm.name.trim()) {
+      notifications.show({ title: '请输入名称', message: '规则名称不能为空。', color: 'red' });
       return;
     }
-    await createMutation.mutateAsync({
-      name,
-      windowPattern: generatedPattern,
+
+    await createStandard.mutateAsync({
+      name: createForm.name.trim(),
+      windowPattern: buildPatternFromPrefixes(createForm.prefix, createForm.mode),
       doorPattern: 'M\\d{4}',
-      wallAreaThreshold: wallSize
+      wallAreaThreshold: createForm.wallAreaThreshold,
+      minWindowArea: createForm.minWindowArea,
+      minSideLength: createForm.minSideLength,
+      labelMaxDistance: createForm.labelMaxDistance,
+      layerIncludeKeywords: createForm.layerIncludeKeywords,
+      layerExcludeKeywords: createForm.layerExcludeKeywords,
     });
-    setName('');
-    notifications.show({ title: '标准已添加', message: '新的识别规则已保存', color: 'green' });
+
+    notifications.show({ title: '已保存', message: '识别标准已创建', color: 'teal' });
+    setCreateOpened(false);
   };
 
-  const applyStandard = (std: any) => {
-    setSelectedStandardId(std.id);
-    setIdentRules({
-      windowPrefix: prefix,
-      windowPattern: std.windowPattern,
-      wallAreaThreshold: std.wallAreaThreshold
+  const openEditModal = (item: any) => {
+    setEditingStandard(item);
+    setEditForm({
+      name: item.name,
+      prefix: extractPrefixLabel(item.windowPattern),
+      mode: detectPatternMode(item.windowPattern),
+      wallAreaThreshold: item.wallAreaThreshold ?? 4,
+      minWindowArea: item.minWindowArea ?? 0.08,
+      minSideLength: item.minSideLength ?? 180,
+      labelMaxDistance: item.labelMaxDistance ?? 600,
+      layerIncludeKeywords: item.layerIncludeKeywords ?? '窗,window,win',
+      layerExcludeKeywords: item.layerExcludeKeywords ?? '标注,text,dim,轴网,图框,title',
     });
-    notifications.show({ title: '已成功切换', message: `当前生效：${std.name}`, color: 'blue' });
   };
 
-  if (isLoading) return <Center h="100%"><Loader /></Center>;
+  const handleEditSubmit = async (nextForm: StandardFormValue) => {
+    if (!editingStandard || !nextForm.name.trim()) return;
+
+    await updateStandard.mutateAsync({
+      id: editingStandard.id,
+      data: {
+        name: nextForm.name.trim(),
+        windowPattern: buildPatternFromPrefixes(nextForm.prefix, nextForm.mode),
+        doorPattern: 'M\\d{4}',
+        wallAreaThreshold: nextForm.wallAreaThreshold,
+        minWindowArea: nextForm.minWindowArea,
+        minSideLength: nextForm.minSideLength,
+        labelMaxDistance: nextForm.labelMaxDistance,
+        layerIncludeKeywords: nextForm.layerIncludeKeywords,
+        layerExcludeKeywords: nextForm.layerExcludeKeywords,
+      },
+    });
+
+    setEditingStandard(null);
+    notifications.show({ title: '已更新', message: '识别标准已保存', color: 'teal' });
+  };
 
   return (
-    <ScrollArea h="100vh" p="xl">
-      <Box style={{ maxWidth: 900, margin: '0 auto', paddingBottom: 80 }}>
-        <Stack gap="xl">
-          <Box>
-            <Title order={2} mb={4}>智能识别向导</Title>
-            <Text size="sm" c="dimmed">配置图纸识别规则，让系统更聪明地自动分拣窗户和门</Text>
-          </Box>
+    <PageScaffold
+      title="识别标准"
+      description="规则列表放在前面。新建和修改都走弹窗，保存入口固定，不再切 tab。"
+      actions={(
+        <Button
+          leftSection={<IconPlus size={16} />}
+          onClick={() => {
+            setCreateOpened(true);
+          }}
+        >
+          新建规则
+        </Button>
+      )}
+    >
+      <Paper withBorder p="md" radius={12} style={{ display: 'flex', minHeight: 0 }}>
+        <Stack gap="sm" className="soft-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingRight: 4, paddingBottom: 8 }}>
+          <Group justify="space-between" align="flex-start">
+            <Box>
+              <Title order={4}>已有规则</Title>
+              <Text size="sm" c="dimmed" mt={4}>
+                导入 DXF 前先选一条使用中的规则；如果缺规则，直接点右上角新建。
+              </Text>
+            </Box>
+            <Badge variant="light" color="gray">
+              共 {standards.length} 条
+            </Badge>
+          </Group>
 
-          <Paper withBorder p="xl" radius="md" shadow="sm">
-            <Stack gap="lg">
-              <Title order={4}>第一步：起个名字</Title>
-              <TextInput placeholder="例如：通用标准、特定厂家标准..." value={name} onChange={(e) => setName(e.target.value)} />
-              <Divider />
-              <Title order={4}>第二步：定义窗户编号格式</Title>
-              <Group grow>
-                <TextInput label="前缀字母" placeholder="通常是 C" value={prefix} onChange={(e) => setPrefix(e.target.value.toUpperCase())} />
-                <Stack gap={4}>
-                  <Text size="sm" fw={500}>匹配精准度</Text>
-                  <SegmentedControl value={matchType} onChange={setMatchType} data={[
-                    { label: '标准(4位)', value: 'standard' },
-                    { label: '模糊(任意)', value: 'flexible' },
-                    { label: '包含字母', value: 'contains' },
-                  ]} />
-                </Stack>
-              </Group>
-              <Alert icon={<IconEye size={16} />} title="匹配效果预览" color="blue">
-                系统会识别：<Text span fw={700}>{examples}</Text>
-              </Alert>
-              <Divider />
-              <Title order={4}>第三步：杂物过滤强度</Title>
-              <NumberInput label="过滤强度 (㎡)" style={{ width: 200 }} value={wallSize} onChange={(val) => setWallSize(Number(val))} suffix=" ㎡" />
-              <Button size="lg" leftSection={<IconPlus size={20} />} onClick={handleCreate} loading={createMutation.isPending} fullWidth mt="md">保存新标准</Button>
-            </Stack>
-          </Paper>
-
-          <Stack gap="md">
-            <Title order={4}>已保存的识别规则列表</Title>
-            {standards.length === 0 && <Text c="dimmed" ta="center" py="xl">暂无数据</Text>}
-            {standards.map((std: any) => (
-              <Card key={std.id} withBorder padding="lg" radius="md" style={{
-                borderColor: selectedStandardId === std.id ? 'var(--mantine-color-blue-6)' : undefined,
-                backgroundColor: selectedStandardId === std.id ? 'var(--mantine-color-blue-0)' : undefined,
-              }}>
-                <Group justify="space-between">
-                  <Box>
-                    <Group gap="xs">
-                      <Text fw={800} size="lg">{std.name}</Text>
-                      {selectedStandardId === std.id && <Badge color="blue" variant="filled">生效中</Badge>}
-                    </Group>
-                    <Text size="xs" c="dimmed" mt={4}>模式: {std.windowPattern} | 阈值: {std.wallAreaThreshold}㎡</Text>
-                  </Box>
-                  <Group>
-                    <Button variant={selectedStandardId === std.id ? "filled" : "light"} onClick={() => applyStandard(std)} disabled={selectedStandardId === std.id}>应用</Button>
-                    <ActionIcon variant="subtle" color="red" size="lg" onClick={() => deleteMutation.mutate(std.id)} disabled={std.id === 'default-std'}>
-                      <IconTrash size={20} />
-                    </ActionIcon>
+          {standards.map((item: any) => (
+            <Paper
+              key={item.id}
+              withBorder
+              radius={12}
+              p="md"
+              bg={item.id === selectedStandardId ? 'var(--primary-soft)' : '#fff'}
+            >
+              <Group justify="space-between" align="flex-start">
+                <Box>
+                  <Text fw={700}>{item.name}</Text>
+                  <Group gap="xs" mt={8}>
+                    <Badge variant="light" color="gray">
+                      开头 {extractPrefixLabel(item.windowPattern)}
+                    </Badge>
+                    <Badge variant="light" color="blue">
+                      {describePatternMode(item.windowPattern)}
+                    </Badge>
+                    {item.id === selectedStandardId ? (
+                      <Badge variant="light" color="teal">
+                        当前使用中
+                      </Badge>
+                    ) : null}
                   </Group>
+                  <Text size="sm" c="dimmed" mt={8}>
+                    墙体阈值：{item.wallAreaThreshold} ㎡
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    最小窗面积：{item.minWindowArea ?? 0.08} ㎡ / 最小边长：{item.minSideLength ?? 180} mm
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    最大匹配距离：{item.labelMaxDistance ?? 600} mm
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    优先图层：{item.layerIncludeKeywords || '未设置'}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    排除图层：{item.layerExcludeKeywords || '未设置'}
+                  </Text>
+                </Box>
+                <Group gap="xs">
+                  <Button variant="default" onClick={() => openEditModal(item)}>
+                    修改
+                  </Button>
+                  <ActionIcon color="red" variant="subtle" onClick={() => deleteStandard.mutate(item.id)} disabled={item.id === 'default-std'}>
+                    <IconTrash size={16} />
+                  </ActionIcon>
                 </Group>
-              </Card>
-            ))}
-          </Stack>
+              </Group>
+            </Paper>
+          ))}
         </Stack>
-      </Box>
-    </ScrollArea>
+      </Paper>
+
+      <StandardEditorModal
+        opened={createOpened}
+        onClose={() => setCreateOpened(false)}
+        title="新建识别标准"
+        submitLabel="保存规则"
+        initialValue={defaultStandardForm}
+        loading={createStandard.isPending}
+        onSubmit={handleCreateSubmit}
+      />
+
+      <StandardEditorModal
+        opened={!!editingStandard}
+        onClose={() => setEditingStandard(null)}
+        title="修改识别标准"
+        submitLabel="保存修改"
+        initialValue={editForm}
+        loading={updateStandard.isPending}
+        onSubmit={handleEditSubmit}
+      />
+    </PageScaffold>
   );
 };
 

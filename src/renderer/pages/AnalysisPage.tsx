@@ -1,175 +1,511 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { Button, Group, FileButton, Stack, Title, Text, Paper, Progress, Box, TextInput, Modal, ActionIcon, Tooltip, Badge, Center, Loader, Menu, Select } from '@mantine/core';
-import { IconFileCode, IconRefresh, IconTrash, IconDeviceFloppy, IconFocusCentered, IconDownload, IconChevronDown, IconSettings } from '@tabler/icons-react';
+import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActionIcon,
+  Badge,
+  Box,
+  Button,
+  Center,
+  Divider,
+  FileButton,
+  Group,
+  Loader,
+  Modal,
+  Paper,
+  Progress,
+  ScrollArea,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from '@mantine/core';
+import { IconDeviceFloppy, IconFileCode, IconFocusCentered, IconPlus, IconSettings, IconTrash } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
 import { modals } from '@mantine/modals';
+import { useNavigate } from 'react-router-dom';
 
 import { DxfViewer, DxfViewerRef } from '../features/DxfViewer/DxfViewer';
 import { WindowList } from '../features/WindowList/WindowList';
 import { useDxfProcessor } from '../hooks/useDxfProcessor';
-import { usePdfExport } from '../hooks/usePdfExport';
-import { useWindowApi, useStandards } from '../hooks/useWindowApi';
+import { useCreateStandard, useStandards } from '../hooks/useWindowApi';
 import { useWindowStore } from '../stores/windowStore';
 import { WindowItem } from '../../shared/schemas';
+import { PageScaffold } from '../components/ui/PageScaffold';
+import {
+  StandardEditorModal,
+  StandardFormValue,
+  buildPatternFromPrefixes,
+  defaultStandardForm,
+} from '../features/standards/StandardEditorModal';
+import { useShallow } from 'zustand/react/shallow';
+
+const extractPrefixLabel = (pattern: string) => {
+  const multiMatch = pattern.match(/^\^\(\?:([^)]+)\)/);
+  if (multiMatch) return multiMatch[1].replace(/\|/g, ',');
+
+  const singleMatch = pattern.match(/^\^?([A-Z]+)/i);
+  return singleMatch?.[1] || 'C';
+};
 
 const AnalysisPage = () => {
-  const { processedResult, pendingWindows, fileName, processDxf, isProcessing, progress, saveToDb, clear } = useDxfProcessor();
-  const { exportPdf, exportExcel } = usePdfExport();
-  const { unit } = useWindowStore();
   const viewerRef = useRef<DxfViewerRef>(null);
-  
-  const [saveModalOpened, setSaveModalOpened] = useState(false);
+  const navigate = useNavigate();
+  const { processedResult, pendingWindows, fileName, processDxf, rerunRecognition, isProcessing, progress, saveToDb, clear } = useDxfProcessor();
+  const { data: standards = [] } = useStandards();
+  const createStandard = useCreateStandard();
+  const { activeWindowId, selectedStandardId, setSelectedStandardId, setIdentRules, setPricingDraft, addPricingQueueItem } = useWindowStore(useShallow((state) => ({
+    activeWindowId: state.activeWindowId,
+    selectedStandardId: state.selectedStandardId,
+    setSelectedStandardId: state.setSelectedStandardId,
+    setIdentRules: state.setIdentRules,
+    setPricingDraft: state.setPricingDraft,
+    addPricingQueueItem: state.addPricingQueueItem,
+  })));
+
+  const [saveOpened, setSaveOpened] = useState(false);
+  const [createStandardOpened, setCreateStandardOpened] = useState(false);
   const [drawingTitle, setDrawingTitle] = useState('');
   const [importKey, setImportKey] = useState(0);
+  const [enabledExcludedLayers, setEnabledExcludedLayers] = useState<string[]>([]);
+  const [focusedMarker, setFocusedMarker] = useState<{ text: string; x: number; y: number; layer: string } | null>(null);
+  const [showRecognitionReport, setShowRecognitionReport] = useState(false);
+  const [showWindowList, setShowWindowList] = useState(false);
+  const [showAllExcludedLayers, setShowAllExcludedLayers] = useState(false);
+  const [showAllUnmatchedMarkers, setShowAllUnmatchedMarkers] = useState(false);
+  const lastMarkerFocusRef = useRef<{ key: string; at: number } | null>(null);
+  const lastExcludedToggleRef = useRef<{ key: string; at: number } | null>(null);
 
-  const { data: standards = [] } = useStandards();
-  const { selectedStandardId, setSelectedStandardId, setIdentRules } = useWindowStore();
+  const deferredPendingWindows = useDeferredValue(pendingWindows);
+  const deferredRecognitionSummary = useDeferredValue(processedResult?.recognitionSummary ?? null);
 
-  const handleSave = async () => {
-    if (!drawingTitle) return;
-    await saveToDb(drawingTitle);
-    setSaveModalOpened(false);
-    setDrawingTitle('');
+  const activeWindow = useMemo(
+    () => deferredPendingWindows.find((item) => item.id === activeWindowId) || deferredPendingWindows[0] || null,
+    [activeWindowId, deferredPendingWindows],
+  );
+  const realWindows = useMemo(
+    () => deferredPendingWindows.filter((item) => item.category === '真窗'),
+    [deferredPendingWindows],
+  );
+  const recognitionSummary = deferredRecognitionSummary;
+
+  useEffect(() => {
+    setShowRecognitionReport(false);
+    setShowWindowList(false);
+    setShowAllExcludedLayers(false);
+    setShowAllUnmatchedMarkers(false);
+
+    if (!processedResult) return;
+
+    const reportTimer = window.setTimeout(() => {
+      setShowRecognitionReport(true);
+    }, 80);
+    const listTimer = window.setTimeout(() => {
+      setShowWindowList(true);
+    }, 220);
+
+    return () => {
+      window.clearTimeout(reportTimer);
+      window.clearTimeout(listTimer);
+    };
+  }, [processedResult]);
+
+  const applyStandard = useCallback((id: string | null) => {
+    const standard = standards.find((item: any) => item.id === id);
+    if (!standard) return;
+    setSelectedStandardId(standard.id);
+    setIdentRules({
+      windowPrefix: extractPrefixLabel(standard.windowPattern),
+      windowPattern: standard.windowPattern,
+      wallAreaThreshold: standard.wallAreaThreshold,
+      minWindowArea: standard.minWindowArea ?? 0.08,
+      minSideLength: standard.minSideLength ?? 180,
+      labelMaxDistance: standard.labelMaxDistance ?? 600,
+      layerIncludeKeywords: standard.layerIncludeKeywords ?? '窗,window,win',
+      layerExcludeKeywords: standard.layerExcludeKeywords ?? '标注,text,dim,轴网,图框,title',
+    });
+  }, [setIdentRules, setSelectedStandardId, standards]);
+
+  const confirmImport = (file: File) => {
+    setEnabledExcludedLayers([]);
+    setFocusedMarker(null);
+    processDxf(file);
   };
 
-  const openClearConfirm = useCallback(() => {
+  const confirmClear = () => {
     modals.openConfirmModal({
-      title: '确认清空当前工程',
+      title: '清空当前图纸',
       centered: true,
-      children: <Text size="sm">此操作将清空所有解析数据和未保存的记录，确认继续？</Text>,
+      children: <Text size="sm">会移除当前识别结果和未保存清单。</Text>,
       labels: { confirm: '确认清空', cancel: '取消' },
       confirmProps: { color: 'red' },
       onConfirm: () => {
+        setEnabledExcludedLayers([]);
+        setFocusedMarker(null);
         clear();
-        setImportKey(prev => prev + 1);
+        setImportKey((value) => value + 1);
       },
-    });
-  }, [clear]);
-
-  const handleFileSelect = (file: File) => {
-    modals.openConfirmModal({
-      title: '识别标准选择',
-      centered: true,
-      children: (
-        <Stack gap="sm">
-          <Text size="sm">请选择本次图纸解析所使用的识别标准：</Text>
-          <Select
-            data={standards.map((s: any) => ({ value: s.id, label: s.name }))}
-            value={selectedStandardId}
-            onChange={(val) => {
-              const std = standards.find((s: any) => s.id === val);
-              if (std) {
-                setSelectedStandardId(std.id);
-                setIdentRules({
-                  windowPrefix: std.windowPattern.charAt(0),
-                  windowPattern: std.windowPattern,
-                  wallAreaThreshold: std.wallAreaThreshold
-                });
-              }
-            }}
-            placeholder="请选择标准"
-            leftSection={<IconSettings size={16} />}
-          />
-          <Text size="xs" c="dimmed">
-            系统将依据该标准的编号规则（如 C+数字）和墙体面积阈值自动识别窗户。
-          </Text>
-        </Stack>
-      ),
-      labels: { confirm: '开始解析', cancel: '取消' },
-      onConfirm: () => processDxf(file),
     });
   };
 
+  const handleSave = async () => {
+    if (!drawingTitle.trim()) return;
+    await saveToDb(drawingTitle.trim());
+    setSaveOpened(false);
+    setDrawingTitle('');
+  };
+
+  const focusUnmatchedMarker = useCallback((marker: { text: string; x: number; y: number; layer: string }) => {
+    const markerKey = `${marker.text}:${marker.x}:${marker.y}`;
+    const now = Date.now();
+    if (lastMarkerFocusRef.current?.key === markerKey && now - lastMarkerFocusRef.current.at < 250) {
+      return;
+    }
+    lastMarkerFocusRef.current = { key: markerKey, at: now };
+    if (focusedMarker?.text === marker.text && focusedMarker?.x === marker.x && focusedMarker?.y === marker.y) {
+      return;
+    }
+    startTransition(() => {
+      setFocusedMarker(marker);
+    });
+    viewerRef.current?.zoomToMarker(marker);
+  }, [focusedMarker]);
+
+  const toggleExcludedLayer = useCallback(async (layer: string) => {
+    const now = Date.now();
+    if (lastExcludedToggleRef.current?.key === layer && now - lastExcludedToggleRef.current.at < 300) {
+      return;
+    }
+    lastExcludedToggleRef.current = { key: layer, at: now };
+    const nextLayers = enabledExcludedLayers.includes(layer)
+      ? enabledExcludedLayers.filter((item) => item !== layer)
+      : [...enabledExcludedLayers, layer];
+
+    startTransition(() => {
+      setEnabledExcludedLayers(nextLayers);
+      setFocusedMarker(null);
+    });
+    await rerunRecognition(nextLayers);
+  }, [enabledExcludedLayers, rerunRecognition]);
+
+  const handleCreateStandard = useCallback(async (form: StandardFormValue) => {
+    if (!form.name.trim()) {
+      notifications.show({ title: '请输入名称', message: '规则名称不能为空。', color: 'red' });
+      return;
+    }
+
+    const created = await createStandard.mutateAsync({
+      name: form.name.trim(),
+      windowPattern: buildPatternFromPrefixes(form.prefix, form.mode),
+      doorPattern: 'M\\d{4}',
+      wallAreaThreshold: form.wallAreaThreshold,
+      minWindowArea: form.minWindowArea,
+      minSideLength: form.minSideLength,
+      labelMaxDistance: form.labelMaxDistance,
+      layerIncludeKeywords: form.layerIncludeKeywords,
+      layerExcludeKeywords: form.layerExcludeKeywords,
+    });
+
+    const createdStandard = created?.data ?? created;
+    if (createdStandard?.id) {
+      applyStandard(createdStandard.id);
+    }
+    notifications.show({ title: '已保存', message: '识别标准已创建并选中', color: 'teal' });
+    setCreateStandardOpened(false);
+  }, [
+    applyStandard,
+    createStandard,
+  ]);
+
   return (
-    <Box style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', flexDirection: 'column' }}>
-      <Paper h={60} px="md" shadow="none" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #DEE2E6', background: '#fff', flexShrink: 0, zIndex: 10 }}>
-        <Box style={{ width: 80 }} />
-        <Group gap="sm" style={{ flex: 1, minWidth: 0 }}>
-           <Title order={5} style={{ color: '#1A1B1E', fontWeight: 800, whiteSpace: 'nowrap' }}>智能解析工作台</Title>
-           {fileName && <Badge variant="filled" color="blue" size="sm" radius="xs" style={{ flexShrink: 1 }}>{fileName}</Badge>}
-        </Group>
-
-        <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-          {processedResult && (
-            <Menu shadow="md" width={150}>
-              <Menu.Target>
-                <Button variant="light" color="blue" size="sm" leftSection={<IconDownload size={16} />} rightSection={<IconChevronDown size={14} />}>
-                  导出结果
-                </Button>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Item leftSection={<IconDownload size={14} color="green" />} onClick={() => exportExcel(pendingWindows as WindowItem[], unit)}>导出 Excel</Menu.Item>
-                <Menu.Item leftSection={<IconDownload size={14} color="orange" />} onClick={() => exportPdf(pendingWindows as WindowItem[], unit)}>生成 PDF 报表</Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          )}
-
-          {processedResult && (
-            <Tooltip label="视图复位">
-              <ActionIcon variant="light" color="blue" size={32} onClick={() => viewerRef.current?.reset()}>
-                <IconFocusCentered size={18} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-          
-          <Button variant="subtle" color="red" size="sm" onClick={openClearConfirm} disabled={!processedResult && pendingWindows.length === 0}>清空</Button>
-          
-          <FileButton key={importKey} onChange={(file) => file && handleFileSelect(file)} accept=".dxf">
-            {(props) => <Button {...props} variant="filled" size="sm" color="blue" leftSection={<IconFileCode size={16} />} loading={isProcessing}>导入 DXF</Button>}
+    <PageScaffold
+      title="图纸识别"
+      description="顶部切换识别规则，导入 DXF 后直接识别。左侧只保留结果检查，不再把规则列表铺满。"
+      actions={
+        <Group gap="sm" align="end">
+          <Select
+            data={standards.map((item: any) => ({ value: item.id, label: item.name }))}
+            value={selectedStandardId}
+            onChange={applyStandard}
+            placeholder="选择识别规则"
+            leftSection={<IconSettings size={14} />}
+            w={240}
+            styles={{ input: { minHeight: 36 } }}
+          />
+          <Button variant="default" leftSection={<IconPlus size={16} />} onClick={() => setCreateStandardOpened(true)}>
+            新建规则
+          </Button>
+          <Button variant="default" leftSection={<IconTrash size={16} />} onClick={confirmClear} disabled={!processedResult && pendingWindows.length === 0}>
+            清空
+          </Button>
+          <FileButton key={importKey} onChange={(file) => file && confirmImport(file)} accept=".dxf">
+            {(props) => (
+              <Button {...props} leftSection={<IconFileCode size={16} />} loading={isProcessing}>
+                导入 DXF
+              </Button>
+            )}
           </FileButton>
-
-          {pendingWindows.length > 0 && (
-            <Button color="green" size="sm" leftSection={<IconDeviceFloppy size={16} />} onClick={() => { setDrawingTitle(fileName.replace('.dxf', '')); setSaveModalOpened(true); }}>
-              确认保存
-            </Button>
-          )}
         </Group>
-      </Paper>
+      }
+    >
+      <Box h="100%" style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: 12 }}>
+        <Paper withBorder radius={12} p="md" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <Stack gap="md" style={{ flex: 1, minHeight: 0 }}>
+            <Box>
+              <Group justify="space-between" align="center">
+                <Box>
+                  <Text size="sm" c="dimmed">识别结果</Text>
+                  <Title order={4} mt={4}>{fileName || '尚未导入图纸'}</Title>
+                </Box>
+                <Badge>{pendingWindows.length} 项</Badge>
+              </Group>
+              <Text size="sm" c="dimmed" mt={8}>
+                左侧只显示识别后的内容。点击条目，右侧会自动定位到对应窗型。
+              </Text>
+            </Box>
 
-      <Box style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <Box style={{ width: 340, minWidth: 340, flexShrink: 0, borderRight: '1px solid #DEE2E6', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-          <Box p="sm" style={{ borderBottom: '1px solid #F1F3F5', background: '#F8F9FA' }}>
-            <Group justify="space-between">
-              <Text size="xs" weight={800} color="gray.7">已识别清单</Text>
-              <Badge color="blue" variant="filled" size="xs">{pendingWindows.length}</Badge>
-            </Group>
-          </Box>
-          <Box style={{ flex: 1, overflow: 'hidden' }}>
-            <WindowList windows={pendingWindows as WindowItem[]} onDelete={() => {}} onEdit={() => {}} onFocus={(win) => viewerRef.current?.zoomToWindow(win)} />
-          </Box>
-        </Box>
-
-        <Box style={{ flex: 1, position: 'relative', background: '#F1F3F5', overflow: 'hidden' }}>
-          {isProcessing ? (
-            <Center h="100%" style={{ background: '#fff', zIndex: 1000, position: 'absolute', inset: 0 }}>
-              <Stack align="center" gap="lg">
-                <Loader size="xl" variant="bars" color="blue" />
-                <Stack gap={4} align="center">
-                  <Text size="md" weight={700} color="blue">深度解析百万级构件中...</Text>
-                  <Text size="sm" color="dimmed">完成进度: {progress}%</Text>
+            {recognitionSummary && showRecognitionReport ? (
+              <Paper withBorder radius={12} p="sm" bg="#f8fafc">
+                <Stack gap="xs">
+                  <Group justify="space-between" align="center">
+                    <Text fw={600} size="sm">识别报告</Text>
+                    <Badge color={recognitionSummary.unmatchedLabels.length > 0 ? 'yellow' : 'teal'} variant="light">
+                      {recognitionSummary.matchedLabels} / {recognitionSummary.totalLabels}
+                    </Badge>
+                  </Group>
+                  <Text size="xs" c="dimmed">
+                    参与图层：{recognitionSummary.activeEntityLayers.slice(0, 4).join('、') || '无'}
+                  </Text>
+                  <Divider />
+                  <Box>
+                    <Group justify="space-between" align="center" mb={6}>
+                      <Text size="xs" fw={600}>被排除图层</Text>
+                      <Text size="xs" c="dimmed">临时启用后会重新试识别</Text>
+                    </Group>
+                    {recognitionSummary.excludedLayerDetails.length > 0 ? (
+                      <ScrollArea.Autosize mah={108} type="auto">
+                        <Stack gap={6}>
+                          {(showAllExcludedLayers
+                            ? recognitionSummary.excludedLayerDetails
+                            : recognitionSummary.excludedLayerDetails.slice(0, 8)
+                          ).map((item) => {
+                            const isEnabled = enabledExcludedLayers.includes(item.layer);
+                            return (
+                              <Button
+                                key={item.layer}
+                                fullWidth
+                                justify="space-between"
+                                size="compact-sm"
+                                variant={isEnabled ? 'filled' : 'light'}
+                                color={isEnabled ? 'blue' : 'gray'}
+                                onClick={() => toggleExcludedLayer(item.layer)}
+                                loading={isProcessing}
+                              >
+                                {item.layer} {isEnabled ? '已启用' : '已排除'} ({item.entityCount}{item.labelCount > 0 ? ` / 标注${item.labelCount}` : ''})
+                              </Button>
+                            );
+                          })}
+                          {recognitionSummary.excludedLayerDetails.length > 8 ? (
+                            <Button
+                              variant="subtle"
+                              size="compact-xs"
+                              onClick={() => setShowAllExcludedLayers((value) => !value)}
+                            >
+                              {showAllExcludedLayers ? '收起图层' : `展开剩余 ${recognitionSummary.excludedLayerDetails.length - 8} 项`}
+                            </Button>
+                          ) : null}
+                        </Stack>
+                      </ScrollArea.Autosize>
+                    ) : (
+                      <Text size="xs" c="dimmed">无</Text>
+                    )}
+                  </Box>
+                  <Divider />
+                  <Box>
+                    <Group justify="space-between" align="center" mb={6}>
+                      <Text size="xs" fw={600}>未匹配编号</Text>
+                      <Text size="xs" c="dimmed">点击后直接定位问题标注</Text>
+                    </Group>
+                    {recognitionSummary.unmatchedLabelMarkers.length > 0 ? (
+                      <ScrollArea.Autosize mah={140} type="auto">
+                        <Stack gap={6}>
+                          {(showAllUnmatchedMarkers
+                            ? recognitionSummary.unmatchedLabelMarkers
+                            : recognitionSummary.unmatchedLabelMarkers.slice(0, 12)
+                          ).map((marker, index) => {
+                            const isFocused = focusedMarker?.text === marker.text
+                              && focusedMarker?.x === marker.x
+                              && focusedMarker?.y === marker.y;
+                            return (
+                              <Button
+                                key={`${marker.text}-${marker.x}-${marker.y}-${index}`}
+                                fullWidth
+                                justify="space-between"
+                                size="compact-sm"
+                                variant={isFocused ? 'filled' : 'light'}
+                                color={isFocused ? 'red' : 'yellow'}
+                                onClick={() => focusUnmatchedMarker(marker)}
+                              >
+                                {marker.text}
+                              </Button>
+                            );
+                          })}
+                          {recognitionSummary.unmatchedLabelMarkers.length > 12 ? (
+                            <Button
+                              variant="subtle"
+                              size="compact-xs"
+                              onClick={() => setShowAllUnmatchedMarkers((value) => !value)}
+                            >
+                              {showAllUnmatchedMarkers ? '收起编号' : `展开剩余 ${recognitionSummary.unmatchedLabelMarkers.length - 12} 项`}
+                            </Button>
+                          ) : null}
+                        </Stack>
+                      </ScrollArea.Autosize>
+                    ) : (
+                      <Text size="xs" c="dimmed">无</Text>
+                    )}
+                  </Box>
                 </Stack>
-                <Box w={300}><Progress value={progress} size="sm" color="blue" animated striped radius="xl" /></Box>
+              </Paper>
+            ) : recognitionSummary ? (
+              <Paper withBorder radius={12} p="sm" bg="#f8fafc">
+                <Text size="xs" c="dimmed">识别报告加载中...</Text>
+              </Paper>
+            ) : null}
+
+            <Box style={{ flex: 1, minHeight: 0 }}>
+              {showWindowList ? (
+                <WindowList windows={deferredPendingWindows as WindowItem[]} onDelete={() => undefined} onEdit={() => undefined} onFocus={(item) => viewerRef.current?.zoomToWindow(item)} />
+              ) : processedResult ? (
+                <Paper withBorder radius={12} p="sm">
+                  <Text size="xs" c="dimmed">窗列表加载中...</Text>
+                </Paper>
+              ) : null}
+            </Box>
+
+            {deferredPendingWindows.length > 0 ? (
+              <Stack gap="xs">
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    if (!activeWindow) return;
+                    setPricingDraft({
+                      sourceName: activeWindow.name,
+                      width: activeWindow.width,
+                      height: activeWindow.height,
+                      quantity: 1,
+                    });
+                    navigate('/pricing');
+                  }}
+                >
+                  带入报价中心
+                </Button>
+                <Button
+                  variant="light"
+                  onClick={() => {
+                    if (!activeWindow) return;
+                    addPricingQueueItem({
+                      id: activeWindow.id || crypto.randomUUID(),
+                      sourceName: activeWindow.name,
+                      width: activeWindow.width,
+                      height: activeWindow.height,
+                      quantity: 1,
+                    });
+                    navigate('/pricing');
+                  }}
+                >
+                  加入报价准备区
+                </Button>
+                <Button
+                  variant="light"
+                  onClick={() => {
+                    realWindows.forEach((item) => {
+                      addPricingQueueItem({
+                        id: item.id || crypto.randomUUID(),
+                        sourceName: item.name,
+                        width: item.width,
+                        height: item.height,
+                        quantity: 1,
+                      });
+                    });
+                    navigate('/pricing');
+                  }}
+                >
+                  全部真窗加入报价准备区
+                </Button>
+                <Button
+                  leftSection={<IconDeviceFloppy size={16} />}
+                  onClick={() => {
+                    setDrawingTitle(fileName.replace('.dxf', ''));
+                    setSaveOpened(true);
+                  }}
+                >
+                  保存识别结果
+                </Button>
               </Stack>
-            </Center>
-          ) : processedResult ? (
-            <DxfViewer ref={viewerRef} processedResult={processedResult} windows={pendingWindows as WindowItem[]} />
-          ) : (
-            <Center h="100%">
-              <Stack align="center" gap="sm">
-                <IconFileCode size={64} stroke={1} color="#ADB5BD" />
-                <Text c="dimmed" size="sm" fw={500}>请导入工程图纸以开始识别</Text>
-              </Stack>
-            </Center>
-          )}
-        </Box>
+            ) : null}
+          </Stack>
+        </Paper>
+
+        <Paper withBorder radius={12} style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+          <Group justify="space-between" p="md" style={{ borderBottom: '1px solid var(--border-color)' }}>
+            <Box>
+              <Title order={4}>图纸预览</Title>
+              <Text size="sm" c="dimmed" mt={4}>
+                {fileName || '尚未导入图纸'}
+              </Text>
+            </Box>
+            <ActionIcon variant="default" onClick={() => viewerRef.current?.reset()} disabled={!processedResult}>
+              <IconFocusCentered size={18} />
+            </ActionIcon>
+          </Group>
+
+          <Box style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            {isProcessing ? (
+              <Center h="100%">
+                <Stack align="center">
+                  <Loader />
+                  <Text size="sm">正在识别图纸...</Text>
+                  <Box w={260}>
+                    <Progress value={progress} />
+                  </Box>
+                </Stack>
+              </Center>
+            ) : processedResult ? (
+              <DxfViewer
+                ref={viewerRef}
+                processedResult={processedResult}
+                windows={pendingWindows as WindowItem[]}
+                focusedMarker={focusedMarker}
+              />
+            ) : (
+              <Center h="100%">
+                <Stack align="center">
+                  <IconFileCode size={36} />
+                  <Text>导入 DXF 后在这里查看识别结果</Text>
+                </Stack>
+              </Center>
+            )}
+          </Box>
+        </Paper>
       </Box>
 
-      <Modal opened={saveModalOpened} onClose={() => setSaveModalOpened(false)} title="保存工程记录" centered size="sm">
-        <Stack gap="md" p="xs">
-          <TextInput label="记录标题" placeholder="例如：1# 楼标准层" value={drawingTitle} onChange={(e) => setDrawingTitle(e.currentTarget.value)} required data-autofocus />
-          <Button onClick={handleSave} fullWidth size="md">确认并保存</Button>
+      <Modal opened={saveOpened} onClose={() => setSaveOpened(false)} title="保存图纸记录" centered>
+        <Stack>
+          <TextInput label="记录名称" value={drawingTitle} onChange={(event) => setDrawingTitle(event.currentTarget.value)} />
+          <Button onClick={handleSave}>确认保存</Button>
         </Stack>
       </Modal>
-    </Box>
+
+      <StandardEditorModal
+        opened={createStandardOpened}
+        onClose={() => setCreateStandardOpened(false)}
+        title="新建识别标准"
+        submitLabel="保存规则"
+        initialValue={defaultStandardForm}
+        loading={createStandard.isPending}
+        onSubmit={handleCreateStandard}
+      />
+    </PageScaffold>
   );
 };
 

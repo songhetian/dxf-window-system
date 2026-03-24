@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-main: #f8f9fb; /* 核心调整：工业浅灰底色 */
+    --card-bg: #ffffff;
+    --border-color: #e2e8f0;
+    --text-primary: #0f172a;
+  }
+
+  .dark {
+    --bg-main: #020617;
+    --card-bg: #0f172a;
+    --border-color: #1e293b;
+    --text-primary: #f8fafc;
+  }
+
+  html { scrollbar-gutter: stable; }
+
+  body {
+    @apply transition-none antialiased;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+  }
+}
+
+@layer components {
+  .stitch-card {
+    @apply border bg-white dark:bg-[#0f172a] transition-none;
+    border-color: var(--border-color);
+  }
+  
+  .stitch-label {
+    @apply text-[10px] font-black uppercase tracking-widest text-slate-500;
+  }
+
+  .stitch-title {
+    @apply text-xl font-black tracking-tight text-slate-950 dark:text-white;
+  }
+
+  .stitch-input {
+    @apply bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:ring-1 focus:ring-blue-500/50 transition-all;
+  }
+
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+}
