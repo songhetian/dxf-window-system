@@ -6,14 +6,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 
 import { Sidebar } from './components/ui/Sidebar';
-import AnalysisPage from './pages/AnalysisPage';
-import PricingPage from './pages/PricingPage';
 import MaterialsPage from './pages/MaterialsPage';
 import ProductsPage from './pages/ProductsPage';
 import ProductLibraryPage from './pages/ProductLibraryPage';
-import RatesPage from './pages/RatesPage';
-import RecordsPage from './pages/RecordsPage';
-import StandardsPage from './pages/StandardsPage';
 
 const theme = createTheme({
   primaryColor: 'teal',
@@ -52,14 +47,10 @@ export default function App() {
           <Router>
             <MainLayout>
               <Routes>
-                <Route path="/" element={<AnalysisPage />} />
+                <Route path="/" element={<MaterialsPage />} />
                 <Route path="/materials" element={<MaterialsPage />} />
                 <Route path="/products" element={<ProductsPage />} />
                 <Route path="/product-library" element={<ProductLibraryPage />} />
-                <Route path="/pricing" element={<PricingPage />} />
-                <Route path="/rates" element={<RatesPage />} />
-                <Route path="/records" element={<RecordsPage />} />
-                <Route path="/standards" element={<StandardsPage />} />
               </Routes>
             </MainLayout>
           </Router>

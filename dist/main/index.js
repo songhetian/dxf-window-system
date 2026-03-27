@@ -34976,8 +34976,6 @@ const string$1 = (params) => {
 };
 const integer = /^-?\d+$/;
 const number$1 = /^-?\d+(?:\.\d+)?$/;
-const boolean$1 = /^(?:true|false)$/i;
-const _null$2 = /^null$/i;
 const lowercase = /^[^A-Z]*$/;
 const uppercase = /^[^a-z]*$/;
 const $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
@@ -35834,44 +35832,6 @@ const $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
 const $ZodNumberFormat = /* @__PURE__ */ $constructor("$ZodNumberFormat", (inst, def) => {
   $ZodCheckNumberFormat.init(inst, def);
   $ZodNumber.init(inst, def);
-});
-const $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.pattern = boolean$1;
-  inst._zod.parse = (payload, _ctx) => {
-    if (def.coerce)
-      try {
-        payload.value = Boolean(payload.value);
-      } catch (_) {
-      }
-    const input = payload.value;
-    if (typeof input === "boolean")
-      return payload;
-    payload.issues.push({
-      expected: "boolean",
-      code: "invalid_type",
-      input,
-      inst
-    });
-    return payload;
-  };
-});
-const $ZodNull = /* @__PURE__ */ $constructor("$ZodNull", (inst, def) => {
-  $ZodType.init(inst, def);
-  inst._zod.pattern = _null$2;
-  inst._zod.values = /* @__PURE__ */ new Set([null]);
-  inst._zod.parse = (payload, _ctx) => {
-    const input = payload.value;
-    if (input === null)
-      return payload;
-    payload.issues.push({
-      expected: "null",
-      code: "invalid_type",
-      input,
-      inst
-    });
-    return payload;
-  };
 });
 const $ZodUnknown = /* @__PURE__ */ $constructor("$ZodUnknown", (inst, def) => {
   $ZodType.init(inst, def);
@@ -36936,20 +36896,6 @@ function _int(Class, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _boolean(Class, params) {
-  return new Class({
-    type: "boolean",
-    ...normalizeParams(params)
-  });
-}
-// @__NO_SIDE_EFFECTS__
-function _null$1(Class, params) {
-  return new Class({
-    type: "null",
-    ...normalizeParams(params)
-  });
-}
-// @__NO_SIDE_EFFECTS__
 function _unknown(Class) {
   return new Class({
     type: "unknown"
@@ -37594,18 +37540,6 @@ const numberProcessor = (schema, ctx, _json, _params) => {
   if (typeof multipleOf2 === "number")
     json.multipleOf = multipleOf2;
 };
-const booleanProcessor = (_schema, _ctx, json, _params) => {
-  json.type = "boolean";
-};
-const nullProcessor = (_schema, ctx, json, _params) => {
-  if (ctx.target === "openapi-3.0") {
-    json.type = "string";
-    json.nullable = true;
-    json.enum = [null];
-  } else {
-    json.type = "null";
-  }
-};
 const neverProcessor = (_schema, _ctx, json, _params) => {
   json.not = {};
 };
@@ -38174,22 +38108,6 @@ const ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, d
 function int(params) {
   return /* @__PURE__ */ _int(ZodNumberFormat, params);
 }
-const ZodBoolean = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
-  $ZodBoolean.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => booleanProcessor(inst, ctx, json);
-});
-function boolean(params) {
-  return /* @__PURE__ */ _boolean(ZodBoolean, params);
-}
-const ZodNull = /* @__PURE__ */ $constructor("ZodNull", (inst, def) => {
-  $ZodNull.init(inst, def);
-  ZodType.init(inst, def);
-  inst._zod.processJSONSchema = (ctx, json, params) => nullProcessor(inst, ctx, json);
-});
-function _null(params) {
-  return /* @__PURE__ */ _null$1(ZodNull, params);
-}
 const ZodUnknown = /* @__PURE__ */ $constructor("ZodUnknown", (inst, def) => {
   $ZodUnknown.init(inst, def);
   ZodType.init(inst, def);
@@ -38528,47 +38446,6 @@ function v4(options, buf, offset) {
   return _v4(options);
 }
 _enum(["mm", "m"]);
-const WindowItemSchema = object({
-  id: string().uuid().optional(),
-  drawingId: string().uuid().optional(),
-  // 关联图纸 ID
-  name: string().min(1, "名称不能为空"),
-  category: string().default("默认"),
-  shapeType: string(),
-  width: number(),
-  height: number(),
-  area: number(),
-  glassArea: number().optional(),
-  perimeter: number().optional(),
-  frameWeight: number().optional(),
-  handle: string().optional(),
-  arcRatio: number().optional(),
-  symmetryRate: number().optional(),
-  points: array(object({ x: number(), y: number() })),
-  createdAt: string().optional()
-});
-const DrawingSchema = object({
-  id: string().uuid().optional(),
-  title: string(),
-  fileName: string(),
-  windowCount: number(),
-  totalArea: number(),
-  createdAt: string().optional()
-});
-const StandardSchema = object({
-  id: string().optional(),
-  name: string(),
-  windowPattern: string().default("^C\\d{4}$"),
-  doorPattern: string().default("M\\d{4}"),
-  wallAreaThreshold: number().default(4),
-  minWindowArea: number().default(0.08),
-  minSideLength: number().default(180),
-  labelMaxDistance: number().default(600),
-  layerIncludeKeywords: string().default("窗,window,win"),
-  layerExcludeKeywords: string().default("标注,text,dim,轴网,图框,title"),
-  isDefault: number().default(0),
-  createdAt: string().optional()
-});
 const MaterialCategorySchema = object({
   id: string().uuid().optional(),
   name: string(),
@@ -38595,13 +38472,6 @@ const MaterialItemSchema = object({
   createdAt: string().optional(),
   updatedAt: string().optional()
 });
-const PricingRateSchema = object({
-  id: string().uuid().optional(),
-  name: string(),
-  percentage: number().default(0),
-  isActive: number().default(1),
-  createdAt: string().optional()
-});
 const PricingProductItemSchema = object({
   id: string().uuid().optional(),
   productId: string().optional(),
@@ -38623,94 +38493,6 @@ object({
     costPrice: number().optional(),
     retailPrice: number().optional()
   })).default([])
-});
-const QuoteDetailSchema = object({
-  materialId: string().optional(),
-  name: string(),
-  lineId: string().optional(),
-  lineName: string().optional(),
-  sourceType: string().optional(),
-  basisMode: string().optional(),
-  baseValue: number().optional(),
-  categoryName: string().optional(),
-  quantity: number(),
-  unit: string(),
-  costPrice: number(),
-  retailPrice: number(),
-  costSubtotal: number(),
-  retailSubtotal: number(),
-  allocatedCostPerSquareMeter: number().optional(),
-  allocatedRetailPerSquareMeter: number().optional()
-});
-const QuoteExtraMaterialSchema = object({
-  id: string(),
-  materialId: string(),
-  name: string(),
-  categoryId: string().optional(),
-  categoryName: string().optional(),
-  unitType: string(),
-  unitLabel: string().optional(),
-  quantity: number().default(1),
-  costPrice: number().default(0),
-  retailPrice: number().default(0)
-});
-const QuoteLineSchema = object({
-  id: string(),
-  sourceName: string().optional(),
-  productId: string().optional().nullable(),
-  productName: string().optional(),
-  shapeMode: _enum(["rect", "triangle", "trapezoid", "arch", "manual"]).default("rect"),
-  width: number().default(0),
-  height: number().default(0),
-  shapeTopWidth: number().default(0),
-  shapeRise: number().default(0),
-  pricingArea: number().default(0),
-  pricingPerimeter: number().default(0),
-  quantity: number().default(1),
-  area: number().default(0),
-  perimeter: number().default(0),
-  costTotal: number().default(0),
-  retailTotal: number().default(0),
-  lineRateIds: array(string()).default([]),
-  lineRateSummary: array(object({
-    id: string().optional(),
-    name: string(),
-    percentage: number()
-  })).default([]),
-  extraMaterials: array(QuoteExtraMaterialSchema).default([]),
-  details: array(QuoteDetailSchema).default([])
-});
-const PricingQuoteSchema = object({
-  id: string().uuid().optional(),
-  name: string(),
-  productId: string().optional().nullable(),
-  productName: string().optional(),
-  width: number().default(0),
-  height: number().default(0),
-  quantity: number().default(1),
-  area: number().default(0),
-  perimeter: number().default(0),
-  costTotal: number().default(0),
-  retailTotal: number().default(0),
-  globalRateIds: array(string()).default([]),
-  globalRateSummary: array(object({
-    id: string().optional(),
-    name: string(),
-    percentage: number()
-  })).default([]),
-  items: array(QuoteLineSchema).default([]),
-  details: array(QuoteDetailSchema).default([]),
-  createdAt: string().optional()
-});
-const WindowResponseSchema = object({
-  success: boolean(),
-  data: union([array(WindowItemSchema), WindowItemSchema, _null()]).optional(),
-  error: string().optional()
-});
-const DrawingResponseSchema = object({
-  success: boolean(),
-  data: union([array(DrawingSchema), DrawingSchema, _null()]).optional(),
-  error: string().optional()
 });
 function isUndefined(obj) {
   return typeof obj === "undefined" || obj === void 0;
@@ -53206,68 +52988,50 @@ const initDb = (dbPath) => {
   }
   try {
     const hasColumn = (table, column) => {
-      const columns = db2.prepare(`PRAGMA table_info(${table})`).all();
-      return columns.some((item) => item.name === column);
+      try {
+        const columns = db2.prepare(`PRAGMA table_info(${table})`).all();
+        return columns.some((item) => item.name === column);
+      } catch {
+        return false;
+      }
     };
-    if (!hasColumn("materials", "updatedAt")) {
+    if (hasColumn("materials", "id") && !hasColumn("materials", "updatedAt")) {
       db2.exec(`ALTER TABLE materials ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
     }
-    if (!hasColumn("material_categories", "allowMultipleInProduct")) {
+    if (hasColumn("material_categories", "id") && !hasColumn("material_categories", "allowMultipleInProduct")) {
       db2.exec(`ALTER TABLE material_categories ADD COLUMN allowMultipleInProduct INTEGER DEFAULT 0`);
     }
-    if (!hasColumn("material_pricing_modes", "includeInComboTotal")) {
+    if (hasColumn("material_pricing_modes", "id") && !hasColumn("material_pricing_modes", "includeInComboTotal")) {
       db2.exec(`ALTER TABLE material_pricing_modes ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
       db2.exec(`UPDATE material_pricing_modes SET includeInComboTotal = 1 WHERE id = 'area'`);
       db2.exec(`UPDATE material_pricing_modes SET includeInComboTotal = 0 WHERE id IN ('perimeter', 'fixed')`);
     }
-    if (!hasColumn("pricing_products", "updatedAt")) {
+    if (hasColumn("pricing_products", "id") && !hasColumn("pricing_products", "updatedAt")) {
       db2.exec(`ALTER TABLE pricing_products ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
     }
-    if (!hasColumn("pricing_product_items", "calcMode")) {
-      db2.exec(`ALTER TABLE pricing_product_items ADD COLUMN calcMode TEXT DEFAULT 'area'`);
-    }
-    if (!hasColumn("pricing_product_items", "includeInComboTotal")) {
-      db2.exec(`ALTER TABLE pricing_product_items ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
-      db2.exec(`
-        UPDATE pricing_product_items
-        SET includeInComboTotal = COALESCE(
-          (
-            SELECT includeInComboTotal
-            FROM material_pricing_modes
-            WHERE material_pricing_modes.id = materials.unitType
-          ),
-          0
-        )
-        FROM materials
-        WHERE materials.id = pricing_product_items.materialId
-      `);
-    }
-    if (!hasColumn("pricing_product_items", "sortOrder")) {
-      db2.exec(`ALTER TABLE pricing_product_items ADD COLUMN sortOrder INTEGER DEFAULT 0`);
-    }
-    if (!hasColumn("standards", "minWindowArea")) {
-      db2.exec(`ALTER TABLE standards ADD COLUMN minWindowArea REAL DEFAULT 0.08`);
-    }
-    if (!hasColumn("standards", "minSideLength")) {
-      db2.exec(`ALTER TABLE standards ADD COLUMN minSideLength REAL DEFAULT 180`);
-    }
-    if (!hasColumn("standards", "labelMaxDistance")) {
-      db2.exec(`ALTER TABLE standards ADD COLUMN labelMaxDistance REAL DEFAULT 600`);
-    }
-    if (!hasColumn("standards", "layerIncludeKeywords")) {
-      db2.exec(`ALTER TABLE standards ADD COLUMN layerIncludeKeywords TEXT DEFAULT '窗,window,win'`);
-    }
-    if (!hasColumn("standards", "layerExcludeKeywords")) {
-      db2.exec(`ALTER TABLE standards ADD COLUMN layerExcludeKeywords TEXT DEFAULT '标注,text,dim,轴网,图框,title'`);
-    }
-    if (!hasColumn("pricing_quotes", "globalRateIds")) {
-      db2.exec(`ALTER TABLE pricing_quotes ADD COLUMN globalRateIds TEXT NOT NULL DEFAULT '[]'`);
-    }
-    if (!hasColumn("pricing_quotes", "globalRateSummary")) {
-      db2.exec(`ALTER TABLE pricing_quotes ADD COLUMN globalRateSummary TEXT NOT NULL DEFAULT '[]'`);
-    }
-    if (!hasColumn("pricing_quotes", "items")) {
-      db2.exec(`ALTER TABLE pricing_quotes ADD COLUMN items TEXT NOT NULL DEFAULT '[]'`);
+    if (hasColumn("pricing_product_items", "id")) {
+      if (!hasColumn("pricing_product_items", "calcMode")) {
+        db2.exec(`ALTER TABLE pricing_product_items ADD COLUMN calcMode TEXT DEFAULT 'area'`);
+      }
+      if (!hasColumn("pricing_product_items", "includeInComboTotal")) {
+        db2.exec(`ALTER TABLE pricing_product_items ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
+        db2.exec(`
+          UPDATE pricing_product_items
+          SET includeInComboTotal = COALESCE(
+            (
+              SELECT includeInComboTotal
+              FROM material_pricing_modes
+              WHERE material_pricing_modes.id = materials.unitType
+            ),
+            0
+          )
+          FROM materials
+          WHERE materials.id = pricing_product_items.materialId
+        `);
+      }
+      if (!hasColumn("pricing_product_items", "sortOrder")) {
+        db2.exec(`ALTER TABLE pricing_product_items ADD COLUMN sortOrder INTEGER DEFAULT 0`);
+      }
     }
   } catch (err2) {
     console.error("Failed to ensure migrated columns:", err2);
@@ -53286,140 +53050,11 @@ fastify.register(cors, {
 fastify.setValidatorCompiler(validatorCompiler);
 fastify.setSerializerCompiler(serializerCompiler);
 const db = initDb("./dxf-app.db");
-const quoteBodySchema = PricingQuoteSchema.omit({ id: true, createdAt: true });
 const startServer = async (port = 3001) => {
   const api = fastify.withTypeProvider();
-  api.get("/api/drawings", {
-    schema: { response: { 200: DrawingResponseSchema } }
-  }, async () => {
-    const drawings = await db.selectFrom("drawings").selectAll().orderBy("createdAt desc").execute();
-    return { success: true, data: drawings };
-  });
-  api.post("/api/drawings", {
-    schema: {
-      body: object({
-        title: string(),
-        fileName: string(),
-        windows: array(WindowItemSchema.omit({ id: true, drawingId: true, createdAt: true }))
-      }),
-      response: { 201: DrawingResponseSchema }
-    }
-  }, async (request2, reply2) => {
-    const { title: title2, fileName, windows } = request2.body;
-    const drawingId = v4();
-    const createdAt = (/* @__PURE__ */ new Date()).toISOString();
-    const totalArea = windows.reduce((sum, item) => sum + item.area, 0);
-    const drawing = {
-      id: drawingId,
-      title: title2,
-      fileName,
-      windowCount: windows.length,
-      totalArea,
-      createdAt
-    };
-    await db.insertInto("drawings").values(drawing).execute();
-    if (windows.length > 0) {
-      await db.insertInto("windows").values(
-        windows.map((item) => ({
-          ...item,
-          id: v4(),
-          drawingId,
-          points: JSON.stringify(item.points),
-          createdAt
-        }))
-      ).execute();
-    }
-    reply2.status(201).send({ success: true, data: drawing });
-  });
-  api.get("/api/drawings/:id/windows", {
-    schema: {
-      params: object({ id: string().uuid() }),
-      response: { 200: WindowResponseSchema }
-    }
-  }, async (request2) => {
-    const windows = await db.selectFrom("windows").where("drawingId", "=", request2.params.id).selectAll().execute();
-    return {
-      success: true,
-      data: windows.map((item) => ({ ...item, points: JSON.parse(item.points) }))
-    };
-  });
-  api.delete("/api/drawings/:id", {
-    schema: { params: object({ id: string().uuid() }) }
-  }, async (request2) => {
-    await db.deleteFrom("drawings").where("id", "=", request2.params.id).execute();
-    return { success: true };
-  });
-  api.get("/api/standards", async () => {
-    const standards = await db.selectFrom("standards").selectAll().orderBy("createdAt desc").execute();
-    return { success: true, data: standards };
-  });
-  api.post("/api/standards", {
-    schema: {
-      body: StandardSchema.omit({ id: true, createdAt: true, isDefault: true })
-    }
-  }, async (request2) => {
-    const data = { ...request2.body, id: v4(), isDefault: 0, createdAt: (/* @__PURE__ */ new Date()).toISOString() };
-    await db.insertInto("standards").values(data).execute();
-    return { success: true, data };
-  });
-  api.patch("/api/standards/:id", {
-    schema: {
-      params: object({ id: string() }),
-      body: StandardSchema.omit({ id: true, createdAt: true, isDefault: true }).partial()
-    }
-  }, async (request2) => {
-    await db.updateTable("standards").set(request2.body).where("id", "=", request2.params.id).execute();
-    return { success: true };
-  });
-  api.delete("/api/standards/:id", async (request2) => {
-    const { id: id2 } = request2.params;
-    await db.deleteFrom("standards").where("id", "=", id2).execute();
-    return { success: true };
-  });
   api.get("/api/material-categories", async () => {
     const categories = await db.selectFrom("material_categories").selectAll().orderBy("sortOrder asc").orderBy("createdAt asc").execute();
     return { success: true, data: categories };
-  });
-  api.get("/api/material-pricing-modes", async () => {
-    const modes = await db.selectFrom("material_pricing_modes").selectAll().orderBy("sortOrder asc").orderBy("createdAt asc").execute();
-    return { success: true, data: modes };
-  });
-  api.post("/api/material-pricing-modes", {
-    schema: { body: MaterialPricingModeSchema.omit({ id: true, createdAt: true }) }
-  }, async (request2) => {
-    const data = { ...request2.body, id: v4(), createdAt: (/* @__PURE__ */ new Date()).toISOString() };
-    await db.insertInto("material_pricing_modes").values(data).execute();
-    return { success: true, data };
-  });
-  api.patch("/api/material-pricing-modes/:id", {
-    schema: {
-      params: object({ id: string() }),
-      body: MaterialPricingModeSchema.omit({ id: true, createdAt: true }).partial()
-    }
-  }, async (request2) => {
-    await db.updateTable("material_pricing_modes").set(request2.body).where("id", "=", request2.params.id).execute();
-    return { success: true };
-  });
-  api.delete("/api/material-pricing-modes/:id", async (request2, reply2) => {
-    const { id: id2 } = request2.params;
-    if (["area", "perimeter", "fixed"].includes(id2)) {
-      reply2.status(403).send({
-        success: false,
-        error: "系统默认计价方式不可删除。"
-      });
-      return;
-    }
-    const materialCountResult = await db.selectFrom("materials").select(({ fn }) => fn.count("id").as("count")).where("unitType", "=", id2).executeTakeFirst();
-    const materialCount = Number(materialCountResult?.count || 0);
-    if (materialCount > 0) {
-      reply2.status(409).send({
-        success: false,
-        error: `此计价方式仍被 ${materialCount} 项材料使用，请先处理。`
-      });
-      return;
-    }
-    await db.deleteFrom("material_pricing_modes").where("id", "=", id2).execute();
-    return { success: true };
   });
   api.post("/api/material-categories", {
     schema: { body: MaterialCategorySchema.omit({ id: true, createdAt: true }) }
@@ -53451,6 +53086,44 @@ const startServer = async (port = 3001) => {
     await db.deleteFrom("material_categories").where("id", "=", id2).execute();
     return { success: true };
   });
+  api.get("/api/material-pricing-modes", async () => {
+    const modes = await db.selectFrom("material_pricing_modes").selectAll().orderBy("sortOrder asc").orderBy("createdAt asc").execute();
+    return { success: true, data: modes };
+  });
+  api.post("/api/material-pricing-modes", {
+    schema: { body: MaterialPricingModeSchema.omit({ id: true, createdAt: true }) }
+  }, async (request2) => {
+    const data = { ...request2.body, id: v4(), createdAt: (/* @__PURE__ */ new Date()).toISOString() };
+    await db.insertInto("material_pricing_modes").values(data).execute();
+    return { success: true, data };
+  });
+  api.patch("/api/material-pricing-modes/:id", {
+    schema: {
+      params: object({ id: string() }),
+      body: MaterialPricingModeSchema.omit({ id: true, createdAt: true }).partial()
+    }
+  }, async (request2) => {
+    await db.updateTable("material_pricing_modes").set(request2.body).where("id", "=", request2.params.id).execute();
+    return { success: true };
+  });
+  api.delete("/api/material-pricing-modes/:id", async (request2, reply2) => {
+    const { id: id2 } = request2.params;
+    if (["area", "perimeter", "fixed"].includes(id2)) {
+      reply2.status(403).send({ success: false, error: "系统默认计价方式不可删除。" });
+      return;
+    }
+    const materialCountResult = await db.selectFrom("materials").select(({ fn }) => fn.count("id").as("count")).where("unitType", "=", id2).executeTakeFirst();
+    const materialCount = Number(materialCountResult?.count || 0);
+    if (materialCount > 0) {
+      reply2.status(409).send({
+        success: false,
+        error: `此计价方式仍被 ${materialCount} 项材料使用，请先处理。`
+      });
+      return;
+    }
+    await db.deleteFrom("material_pricing_modes").where("id", "=", id2).execute();
+    return { success: true };
+  });
   api.get("/api/materials", async () => {
     const materials = await db.selectFrom("materials").selectAll().orderBy("createdAt desc").execute();
     return { success: true, data: materials };
@@ -53475,22 +53148,6 @@ const startServer = async (port = 3001) => {
   api.delete("/api/materials/:id", async (request2) => {
     const { id: id2 } = request2.params;
     await db.deleteFrom("materials").where("id", "=", id2).execute();
-    return { success: true };
-  });
-  api.get("/api/pricing-rates", async () => {
-    const rates = await db.selectFrom("pricing_rates").selectAll().orderBy("createdAt desc").execute();
-    return { success: true, data: rates };
-  });
-  api.post("/api/pricing-rates", {
-    schema: { body: PricingRateSchema.omit({ id: true, createdAt: true }) }
-  }, async (request2) => {
-    const data = { ...request2.body, id: v4(), createdAt: (/* @__PURE__ */ new Date()).toISOString() };
-    await db.insertInto("pricing_rates").values(data).execute();
-    return { success: true, data };
-  });
-  api.delete("/api/pricing-rates/:id", async (request2) => {
-    const { id: id2 } = request2.params;
-    await db.deleteFrom("pricing_rates").where("id", "=", id2).execute();
     return { success: true };
   });
   api.get("/api/pricing-products", async () => {
@@ -53601,48 +53258,6 @@ const startServer = async (port = 3001) => {
   api.delete("/api/pricing-products/:id", async (request2) => {
     const { id: id2 } = request2.params;
     await db.deleteFrom("pricing_products").where("id", "=", id2).execute();
-    return { success: true };
-  });
-  api.get("/api/pricing-quotes", async () => {
-    const quotes = await db.selectFrom("pricing_quotes").selectAll().orderBy("createdAt desc").execute();
-    return {
-      success: true,
-      data: quotes.map((item) => ({
-        ...item,
-        globalRateIds: JSON.parse(item.globalRateIds),
-        globalRateSummary: JSON.parse(item.globalRateSummary),
-        items: JSON.parse(item.items),
-        details: JSON.parse(item.details)
-      }))
-    };
-  });
-  api.post("/api/pricing-quotes", {
-    schema: {
-      body: quoteBodySchema,
-      response: { 201: PricingQuoteSchema }
-    }
-  }, async (request2, reply2) => {
-    const data = {
-      ...request2.body,
-      id: v4(),
-      globalRateIds: JSON.stringify(request2.body.globalRateIds || []),
-      globalRateSummary: JSON.stringify(request2.body.globalRateSummary || []),
-      items: JSON.stringify(request2.body.items || []),
-      details: JSON.stringify(request2.body.details),
-      createdAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    await db.insertInto("pricing_quotes").values(data).execute();
-    reply2.status(201).send({
-      ...data,
-      globalRateIds: request2.body.globalRateIds || [],
-      globalRateSummary: request2.body.globalRateSummary || [],
-      items: request2.body.items || [],
-      details: request2.body.details
-    });
-  });
-  api.delete("/api/pricing-quotes/:id", async (request2) => {
-    const { id: id2 } = request2.params;
-    await db.deleteFrom("pricing_quotes").where("id", "=", id2).execute();
     return { success: true };
   });
   try {

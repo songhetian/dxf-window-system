@@ -12,14 +12,9 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const items = [
-  { path: '/', label: '图纸识别', icon: IconFileCode },
   { path: '/materials', label: '材料库', icon: IconListSearch },
   { path: '/products', label: '组合设置', icon: IconPackage },
   { path: '/product-library', label: '组合库', icon: IconLayoutGrid },
-  { path: '/pricing', label: '报价中心', icon: IconCalculator },
-  { path: '/rates', label: '费率设置', icon: IconPercentage },
-  { path: '/records', label: '记录中心', icon: IconHistory },
-  { path: '/standards', label: '识别标准', icon: IconRulerMeasure },
 ];
 
 export const Sidebar = () => {
@@ -42,7 +37,7 @@ export const Sidebar = () => {
         <Box p={16} style={{ borderBottom: '1px solid var(--border-color)' }}>
           <Text fw={800} size="lg">DXF Window</Text>
           <Text size="sm" c="dimmed" mt={4}>
-            识别、报价、归档
+            材料与组合管理
           </Text>
         </Box>
 

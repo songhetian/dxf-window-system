@@ -34,95 +34,6 @@ const fetchJson = async (input: string, init?: RequestInit) => {
   }
 };
 
-export const useDrawings = () => useQuery({
-  queryKey: ['drawings'],
-  queryFn: async (): Promise<DrawingItem[]> => {
-    const json = await fetchJson(`${API_BASE}/drawings`);
-    return json.data || [];
-  },
-});
-
-export const useCreateDrawing = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: { title: string; fileName: string; windows: Omit<WindowItem, 'id' | 'drawingId' | 'createdAt'>[] }) =>
-      fetchJson(`${API_BASE}/drawings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drawings'] });
-    },
-  });
-};
-
-export const useDrawingWindows = (drawingId: string | null) => useQuery({
-  queryKey: ['drawings', drawingId, 'windows'],
-  queryFn: async (): Promise<WindowItem[]> => {
-    if (!drawingId) return [];
-    const json = await fetchJson(`${API_BASE}/drawings/${drawingId}/windows`);
-    return json.data || [];
-  },
-  enabled: !!drawingId,
-});
-
-export const useDeleteDrawing = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => fetchJson(`${API_BASE}/drawings/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['drawings'] });
-    },
-  });
-};
-
-export const useStandards = () => useQuery({
-  queryKey: ['standards'],
-  queryFn: async () => {
-    const json = await fetchJson(`${API_BASE}/standards`);
-    return json.data || [];
-  },
-});
-
-export const useCreateStandard = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: any) => fetchJson(`${API_BASE}/standards`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['standards'] });
-    },
-  });
-};
-
-export const useDeleteStandard = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => fetchJson(`${API_BASE}/standards/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['standards'] });
-    },
-  });
-};
-
-export const useUpdateStandard = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => fetchJson(`${API_BASE}/standards/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['standards'] });
-    },
-  });
-};
-
 export const useMaterialCategories = () => useQuery({
   queryKey: ['material-categories'],
   queryFn: async (): Promise<MaterialCategory[]> => {
@@ -276,38 +187,6 @@ export const useUpdateMaterial = () => {
   });
 };
 
-export const usePricingRates = () => useQuery({
-  queryKey: ['pricing-rates'],
-  queryFn: async (): Promise<PricingRate[]> => {
-    const json = await fetchJson(`${API_BASE}/pricing-rates`);
-    return json.data || [];
-  },
-});
-
-export const useCreatePricingRate = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: Omit<PricingRate, 'id' | 'createdAt'>) => fetchJson(`${API_BASE}/pricing-rates`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pricing-rates'] });
-    },
-  });
-};
-
-export const useDeletePricingRate = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => fetchJson(`${API_BASE}/pricing-rates/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pricing-rates'] });
-    },
-  });
-};
-
 export const usePricingProducts = () => useQuery({
   queryKey: ['pricing-products'],
   queryFn: async (): Promise<PricingProduct[]> => {
@@ -360,34 +239,3 @@ export const useUpdatePricingProduct = () => {
   });
 };
 
-export const usePricingQuotes = () => useQuery({
-  queryKey: ['pricing-quotes'],
-  queryFn: async (): Promise<PricingQuote[]> => {
-    const json = await fetchJson(`${API_BASE}/pricing-quotes`);
-    return json.data || [];
-  },
-});
-
-export const useCreatePricingQuote = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: Omit<PricingQuote, 'id' | 'createdAt'>) => fetchJson(`${API_BASE}/pricing-quotes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] });
-    },
-  });
-};
-
-export const useDeletePricingQuote = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => fetchJson(`${API_BASE}/pricing-quotes/${id}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pricing-quotes'] });
-    },
-  });
-};

@@ -1,34 +1,20 @@
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import {
-  WindowItem,
-  DrawingItem,
   MaterialCategory,
   MaterialPricingMode,
   MaterialItem,
   PricingProduct,
-  PricingRate,
-  PricingQuote,
 } from '../../shared/schemas';
 import fs from 'fs';
 import path from 'path';
 
 interface DatabaseSchema {
-  windows: WindowItem;
-  drawings: DrawingItem;
-  standards: any;
   material_categories: MaterialCategory;
   material_pricing_modes: MaterialPricingMode;
   materials: MaterialItem;
   pricing_products: Omit<PricingProduct, 'items'>;
   pricing_product_items: any;
-  pricing_rates: PricingRate;
-  pricing_quotes: Omit<PricingQuote, 'details' | 'items' | 'globalRateIds' | 'globalRateSummary'> & {
-    details: string;
-    items: string;
-    globalRateIds: string;
-    globalRateSummary: string;
-  };
 }
 
 export const initDb = (dbPath: string) => {
@@ -65,69 +51,51 @@ export const initDb = (dbPath: string) => {
 
   try {
     const hasColumn = (table: string, column: string) => {
-      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-      return columns.some((item) => item.name === column);
+      try {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+        return columns.some((item) => item.name === column);
+      } catch {
+        return false;
+      }
     };
 
-    if (!hasColumn('materials', 'updatedAt')) {
+    if (hasColumn('materials', 'id') && !hasColumn('materials', 'updatedAt')) {
       db.exec(`ALTER TABLE materials ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
     }
-    if (!hasColumn('material_categories', 'allowMultipleInProduct')) {
+    if (hasColumn('material_categories', 'id') && !hasColumn('material_categories', 'allowMultipleInProduct')) {
       db.exec(`ALTER TABLE material_categories ADD COLUMN allowMultipleInProduct INTEGER DEFAULT 0`);
     }
-    if (!hasColumn('material_pricing_modes', 'includeInComboTotal')) {
+    if (hasColumn('material_pricing_modes', 'id') && !hasColumn('material_pricing_modes', 'includeInComboTotal')) {
       db.exec(`ALTER TABLE material_pricing_modes ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
       db.exec(`UPDATE material_pricing_modes SET includeInComboTotal = 1 WHERE id = 'area'`);
       db.exec(`UPDATE material_pricing_modes SET includeInComboTotal = 0 WHERE id IN ('perimeter', 'fixed')`);
     }
-    if (!hasColumn('pricing_products', 'updatedAt')) {
+    if (hasColumn('pricing_products', 'id') && !hasColumn('pricing_products', 'updatedAt')) {
       db.exec(`ALTER TABLE pricing_products ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
     }
-    if (!hasColumn('pricing_product_items', 'calcMode')) {
-      db.exec(`ALTER TABLE pricing_product_items ADD COLUMN calcMode TEXT DEFAULT 'area'`);
-    }
-    if (!hasColumn('pricing_product_items', 'includeInComboTotal')) {
-      db.exec(`ALTER TABLE pricing_product_items ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
-      db.exec(`
-        UPDATE pricing_product_items
-        SET includeInComboTotal = COALESCE(
-          (
-            SELECT includeInComboTotal
-            FROM material_pricing_modes
-            WHERE material_pricing_modes.id = materials.unitType
-          ),
-          0
-        )
-        FROM materials
-        WHERE materials.id = pricing_product_items.materialId
-      `);
-    }
-    if (!hasColumn('pricing_product_items', 'sortOrder')) {
-      db.exec(`ALTER TABLE pricing_product_items ADD COLUMN sortOrder INTEGER DEFAULT 0`);
-    }
-    if (!hasColumn('standards', 'minWindowArea')) {
-      db.exec(`ALTER TABLE standards ADD COLUMN minWindowArea REAL DEFAULT 0.08`);
-    }
-    if (!hasColumn('standards', 'minSideLength')) {
-      db.exec(`ALTER TABLE standards ADD COLUMN minSideLength REAL DEFAULT 180`);
-    }
-    if (!hasColumn('standards', 'labelMaxDistance')) {
-      db.exec(`ALTER TABLE standards ADD COLUMN labelMaxDistance REAL DEFAULT 600`);
-    }
-    if (!hasColumn('standards', 'layerIncludeKeywords')) {
-      db.exec(`ALTER TABLE standards ADD COLUMN layerIncludeKeywords TEXT DEFAULT '窗,window,win'`);
-    }
-    if (!hasColumn('standards', 'layerExcludeKeywords')) {
-      db.exec(`ALTER TABLE standards ADD COLUMN layerExcludeKeywords TEXT DEFAULT '标注,text,dim,轴网,图框,title'`);
-    }
-    if (!hasColumn('pricing_quotes', 'globalRateIds')) {
-      db.exec(`ALTER TABLE pricing_quotes ADD COLUMN globalRateIds TEXT NOT NULL DEFAULT '[]'`);
-    }
-    if (!hasColumn('pricing_quotes', 'globalRateSummary')) {
-      db.exec(`ALTER TABLE pricing_quotes ADD COLUMN globalRateSummary TEXT NOT NULL DEFAULT '[]'`);
-    }
-    if (!hasColumn('pricing_quotes', 'items')) {
-      db.exec(`ALTER TABLE pricing_quotes ADD COLUMN items TEXT NOT NULL DEFAULT '[]'`);
+    if (hasColumn('pricing_product_items', 'id')) {
+      if (!hasColumn('pricing_product_items', 'calcMode')) {
+        db.exec(`ALTER TABLE pricing_product_items ADD COLUMN calcMode TEXT DEFAULT 'area'`);
+      }
+      if (!hasColumn('pricing_product_items', 'includeInComboTotal')) {
+        db.exec(`ALTER TABLE pricing_product_items ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
+        db.exec(`
+          UPDATE pricing_product_items
+          SET includeInComboTotal = COALESCE(
+            (
+              SELECT includeInComboTotal
+              FROM material_pricing_modes
+              WHERE material_pricing_modes.id = materials.unitType
+            ),
+            0
+          )
+          FROM materials
+          WHERE materials.id = pricing_product_items.materialId
+        `);
+      }
+      if (!hasColumn('pricing_product_items', 'sortOrder')) {
+        db.exec(`ALTER TABLE pricing_product_items ADD COLUMN sortOrder INTEGER DEFAULT 0`);
+      }
     }
   } catch (err) {
     console.error('Failed to ensure migrated columns:', err);
