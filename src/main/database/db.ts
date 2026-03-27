@@ -23,7 +23,12 @@ interface DatabaseSchema {
   pricing_products: Omit<PricingProduct, 'items'>;
   pricing_product_items: any;
   pricing_rates: PricingRate;
-  pricing_quotes: Omit<PricingQuote, 'details'> & { details: string };
+  pricing_quotes: Omit<PricingQuote, 'details' | 'items' | 'globalRateIds' | 'globalRateSummary'> & {
+    details: string;
+    items: string;
+    globalRateIds: string;
+    globalRateSummary: string;
+  };
 }
 
 export const initDb = (dbPath: string) => {
@@ -70,11 +75,32 @@ export const initDb = (dbPath: string) => {
     if (!hasColumn('material_categories', 'allowMultipleInProduct')) {
       db.exec(`ALTER TABLE material_categories ADD COLUMN allowMultipleInProduct INTEGER DEFAULT 0`);
     }
+    if (!hasColumn('material_pricing_modes', 'includeInComboTotal')) {
+      db.exec(`ALTER TABLE material_pricing_modes ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
+      db.exec(`UPDATE material_pricing_modes SET includeInComboTotal = 1 WHERE id = 'area'`);
+      db.exec(`UPDATE material_pricing_modes SET includeInComboTotal = 0 WHERE id IN ('perimeter', 'fixed')`);
+    }
     if (!hasColumn('pricing_products', 'updatedAt')) {
       db.exec(`ALTER TABLE pricing_products ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
     }
     if (!hasColumn('pricing_product_items', 'calcMode')) {
       db.exec(`ALTER TABLE pricing_product_items ADD COLUMN calcMode TEXT DEFAULT 'area'`);
+    }
+    if (!hasColumn('pricing_product_items', 'includeInComboTotal')) {
+      db.exec(`ALTER TABLE pricing_product_items ADD COLUMN includeInComboTotal INTEGER DEFAULT 0`);
+      db.exec(`
+        UPDATE pricing_product_items
+        SET includeInComboTotal = COALESCE(
+          (
+            SELECT includeInComboTotal
+            FROM material_pricing_modes
+            WHERE material_pricing_modes.id = materials.unitType
+          ),
+          0
+        )
+        FROM materials
+        WHERE materials.id = pricing_product_items.materialId
+      `);
     }
     if (!hasColumn('pricing_product_items', 'sortOrder')) {
       db.exec(`ALTER TABLE pricing_product_items ADD COLUMN sortOrder INTEGER DEFAULT 0`);
@@ -93,6 +119,15 @@ export const initDb = (dbPath: string) => {
     }
     if (!hasColumn('standards', 'layerExcludeKeywords')) {
       db.exec(`ALTER TABLE standards ADD COLUMN layerExcludeKeywords TEXT DEFAULT '标注,text,dim,轴网,图框,title'`);
+    }
+    if (!hasColumn('pricing_quotes', 'globalRateIds')) {
+      db.exec(`ALTER TABLE pricing_quotes ADD COLUMN globalRateIds TEXT NOT NULL DEFAULT '[]'`);
+    }
+    if (!hasColumn('pricing_quotes', 'globalRateSummary')) {
+      db.exec(`ALTER TABLE pricing_quotes ADD COLUMN globalRateSummary TEXT NOT NULL DEFAULT '[]'`);
+    }
+    if (!hasColumn('pricing_quotes', 'items')) {
+      db.exec(`ALTER TABLE pricing_quotes ADD COLUMN items TEXT NOT NULL DEFAULT '[]'`);
     }
   } catch (err) {
     console.error('Failed to ensure migrated columns:', err);

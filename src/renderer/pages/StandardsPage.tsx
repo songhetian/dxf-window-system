@@ -16,6 +16,7 @@ import { notifications } from '@mantine/notifications';
 import { PageScaffold } from '../components/ui/PageScaffold';
 import { useCreateStandard, useDeleteStandard, useStandards, useUpdateStandard } from '../hooks/useWindowApi';
 import { useWindowStore } from '../stores/windowStore';
+import { useShallow } from 'zustand/react/shallow';
 import {
   StandardEditorModal,
   StandardFormValue,
@@ -38,7 +39,7 @@ const detectPatternMode = (pattern: string) => {
 };
 
 const describePatternMode = (pattern: string) => {
-  if (pattern.startsWith('.*')) return '只要包含开头';
+  if (pattern.startsWith('.*')) return '只要包含前缀';
   if (pattern.includes('\\d+') && !pattern.includes('\\d{4}')) return '任意位数字';
   return '固定4位数字';
 };
@@ -49,7 +50,9 @@ const StandardsPage = () => {
   const createStandard = useCreateStandard();
   const deleteStandard = useDeleteStandard();
   const updateStandard = useUpdateStandard();
-  const { selectedStandardId } = useWindowStore();
+  const { selectedStandardId } = useWindowStore(useShallow((state) => ({
+    selectedStandardId: state.selectedStandardId,
+  })));
 
   const [createOpened, setCreateOpened] = useState(false);
   const [editingStandard, setEditingStandard] = useState<any | null>(null);
@@ -117,7 +120,7 @@ const StandardsPage = () => {
   return (
     <PageScaffold
       title="识别标准"
-      description="规则列表放在前面。新建和修改都走弹窗，保存入口固定，不再切 tab。"
+      description="标准按业务规则配置：前缀、图层、尺寸阈值。反向和撇号后缀会自动识别，不需要自己写复杂正则。"
       actions={(
         <Button
           leftSection={<IconPlus size={16} />}
@@ -135,7 +138,7 @@ const StandardsPage = () => {
             <Box>
               <Title order={4}>已有规则</Title>
               <Text size="sm" c="dimmed" mt={4}>
-                导入 DXF 前先选一条使用中的规则；如果缺规则，直接点右上角新建。
+                建议先只填真窗前缀，例如 `C`。如果项目里大样前缀不同，单独建一条规则，不要和真窗混填。
               </Text>
             </Box>
             <Badge variant="light" color="gray">
@@ -156,7 +159,7 @@ const StandardsPage = () => {
                   <Text fw={700}>{item.name}</Text>
                   <Group gap="xs" mt={8}>
                     <Badge variant="light" color="gray">
-                      开头 {extractPrefixLabel(item.windowPattern)}
+                      前缀 {extractPrefixLabel(item.windowPattern)}
                     </Badge>
                     <Badge variant="light" color="blue">
                       {describePatternMode(item.windowPattern)}
@@ -175,6 +178,9 @@ const StandardsPage = () => {
                   </Text>
                   <Text size="sm" c="dimmed">
                     最大匹配距离：{item.labelMaxDistance ?? 600} mm
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    自动支持后缀：反、'、中文/字母变体
                   </Text>
                   <Text size="sm" c="dimmed">
                     优先图层：{item.layerIncludeKeywords || '未设置'}

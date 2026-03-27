@@ -5,8 +5,20 @@ type RecognitionMarker = { text: string; x: number; y: number; layer: string };
 type RecognitionSummary = {
   totalLabels: number;
   matchedLabels: number;
+  candidateLabelCodes: string[];
+  matchedLabelCodes: string[];
+  rawLabelSamples: string[];
+  labelCodeStats: Array<{ code: string; rawCount: number; matchedCount: number }>;
   unmatchedLabels: string[];
   unmatchedLabelMarkers: RecognitionMarker[];
+  diagnostic: {
+    rawTextCount: number;
+    regexMatchedTextCount: number;
+    filteredLabelCount: number;
+    filteredEntityCount: number;
+    loopCandidateCount: number;
+    reason: string;
+  };
   includedLayers: string[];
   excludedLayers: string[];
   excludedLayerDetails: Array<{ layer: string; entityCount: number; labelCount: number }>;

@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS material_pricing_modes (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     unitLabel TEXT NOT NULL DEFAULT '件',
+    includeInComboTotal INTEGER DEFAULT 0,
     sortOrder INTEGER DEFAULT 0,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS pricing_product_items (
     materialId TEXT NOT NULL,
     calcMode TEXT NOT NULL DEFAULT 'area',
     quantity REAL DEFAULT 1,
+    includeInComboTotal INTEGER DEFAULT 0,
     sortOrder INTEGER DEFAULT 0,
     FOREIGN KEY (productId) REFERENCES pricing_products(id) ON DELETE CASCADE,
     FOREIGN KEY (materialId) REFERENCES materials(id) ON DELETE CASCADE
@@ -134,6 +136,9 @@ CREATE TABLE IF NOT EXISTS pricing_quotes (
     perimeter REAL DEFAULT 0,
     costTotal REAL DEFAULT 0,
     retailTotal REAL DEFAULT 0,
+    globalRateIds TEXT NOT NULL DEFAULT '[]',
+    globalRateSummary TEXT NOT NULL DEFAULT '[]',
+    items TEXT NOT NULL DEFAULT '[]',
     details TEXT NOT NULL,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (productId) REFERENCES pricing_products(id) ON DELETE SET NULL
@@ -142,14 +147,14 @@ CREATE TABLE IF NOT EXISTS pricing_quotes (
 INSERT OR IGNORE INTO material_categories (id, name, sortOrder)
 VALUES ('default-material-category', '默认材料分类', 0);
 
-INSERT OR IGNORE INTO material_pricing_modes (id, name, unitLabel, sortOrder)
-VALUES ('area', '按面积', '㎡', 0);
+INSERT OR IGNORE INTO material_pricing_modes (id, name, unitLabel, includeInComboTotal, sortOrder)
+VALUES ('area', '按面积', '㎡', 1, 0);
 
-INSERT OR IGNORE INTO material_pricing_modes (id, name, unitLabel, sortOrder)
-VALUES ('perimeter', '按长度', 'm', 1);
+INSERT OR IGNORE INTO material_pricing_modes (id, name, unitLabel, includeInComboTotal, sortOrder)
+VALUES ('perimeter', '按长度', 'm', 0, 1);
 
-INSERT OR IGNORE INTO material_pricing_modes (id, name, unitLabel, sortOrder)
-VALUES ('fixed', '按件数', '件', 2);
+INSERT OR IGNORE INTO material_pricing_modes (id, name, unitLabel, includeInComboTotal, sortOrder)
+VALUES ('fixed', '按件数', '件', 0, 2);
 
 INSERT OR IGNORE INTO pricing_rates (id, name, percentage, isActive)
 VALUES ('default-pricing-rate', '基础损耗费', 0, 1);

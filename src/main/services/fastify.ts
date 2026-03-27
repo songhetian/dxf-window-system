@@ -30,28 +30,7 @@ fastify.setSerializerCompiler(serializerCompiler);
 
 const db = initDb('./dxf-app.db');
 
-const quoteBodySchema = z.object({
-  name: z.string(),
-  productId: z.string().nullable().optional(),
-  productName: z.string().optional(),
-  width: z.number(),
-  height: z.number(),
-  quantity: z.number(),
-  area: z.number(),
-  perimeter: z.number(),
-  costTotal: z.number(),
-  retailTotal: z.number(),
-  details: z.array(z.object({
-    materialId: z.string().optional(),
-    name: z.string(),
-    quantity: z.number(),
-    unit: z.string(),
-    costPrice: z.number(),
-    retailPrice: z.number(),
-    costSubtotal: z.number(),
-    retailSubtotal: z.number(),
-  })),
-});
+const quoteBodySchema = PricingQuoteSchema.omit({ id: true, createdAt: true });
 
 export const startServer = async (port: number = 3001) => {
   const api = fastify.withTypeProvider<ZodTypeProvider>();
@@ -336,16 +315,27 @@ export const startServer = async (port: number = 3001) => {
           materialId: z.string(),
           calcMode: z.enum(['area', 'perimeter', 'fixed']).default('area'),
           quantity: z.number(),
+          includeInComboTotal: z.number().optional(),
           sortOrder: z.number().optional(),
         })),
       }),
     },
-  }, async (request) => {
+  }, async (request, reply) => {
+    const existingProduct = await db
+      .selectFrom('pricing_products')
+      .select(['id'])
+      .where('name', '=', request.body.name.trim())
+      .executeTakeFirst();
+
+    if (existingProduct) {
+      return reply.status(409).send({ success: false, error: '组合名称已存在，请修改后再保存。' });
+    }
+
     const productId = uuidv4();
     const createdAt = new Date().toISOString();
     await db.insertInto('pricing_products').values({
       id: productId,
-      name: request.body.name,
+      name: request.body.name.trim(),
       pricingMode: request.body.pricingMode,
       createdAt,
       updatedAt: createdAt,
@@ -359,6 +349,7 @@ export const startServer = async (port: number = 3001) => {
           materialId: item.materialId,
           calcMode: item.calcMode,
           quantity: item.quantity,
+          includeInComboTotal: item.includeInComboTotal ?? 0,
           sortOrder: item.sortOrder || 0,
         })),
       ).execute();
@@ -377,14 +368,27 @@ export const startServer = async (port: number = 3001) => {
           materialId: z.string(),
           calcMode: z.enum(['area', 'perimeter', 'fixed']).default('area'),
           quantity: z.number(),
+          includeInComboTotal: z.number().optional(),
           sortOrder: z.number().optional(),
         })),
       }),
     },
-  }, async (request) => {
+  }, async (request, reply) => {
     const { id } = request.params;
+    const nextName = request.body.name.trim();
+    const existingProduct = await db
+      .selectFrom('pricing_products')
+      .select(['id'])
+      .where('name', '=', nextName)
+      .where('id', '!=', id)
+      .executeTakeFirst();
+
+    if (existingProduct) {
+      return reply.status(409).send({ success: false, error: '组合名称已存在，请修改后再保存。' });
+    }
+
     await db.updateTable('pricing_products').set({
-      name: request.body.name,
+      name: nextName,
       pricingMode: request.body.pricingMode,
       updatedAt: new Date().toISOString(),
     }).where('id', '=', id).execute();
@@ -398,6 +402,7 @@ export const startServer = async (port: number = 3001) => {
           materialId: item.materialId,
           calcMode: item.calcMode,
           quantity: item.quantity,
+          includeInComboTotal: item.includeInComboTotal ?? 0,
           sortOrder: item.sortOrder || 0,
         })),
       ).execute();
@@ -415,7 +420,13 @@ export const startServer = async (port: number = 3001) => {
     const quotes = await db.selectFrom('pricing_quotes').selectAll().orderBy('createdAt desc').execute();
     return {
       success: true,
-      data: quotes.map((item) => ({ ...item, details: JSON.parse(item.details) })),
+      data: quotes.map((item) => ({
+        ...item,
+        globalRateIds: JSON.parse(item.globalRateIds),
+        globalRateSummary: JSON.parse(item.globalRateSummary),
+        items: JSON.parse(item.items),
+        details: JSON.parse(item.details),
+      })),
     };
   });
 
@@ -428,11 +439,20 @@ export const startServer = async (port: number = 3001) => {
     const data = {
       ...request.body,
       id: uuidv4(),
+      globalRateIds: JSON.stringify(request.body.globalRateIds || []),
+      globalRateSummary: JSON.stringify(request.body.globalRateSummary || []),
+      items: JSON.stringify(request.body.items || []),
       details: JSON.stringify(request.body.details),
       createdAt: new Date().toISOString(),
     };
     await db.insertInto('pricing_quotes').values(data).execute();
-    reply.status(201).send({ ...data, details: request.body.details } as any);
+    reply.status(201).send({
+      ...data,
+      globalRateIds: request.body.globalRateIds || [],
+      globalRateSummary: request.body.globalRateSummary || [],
+      items: request.body.items || [],
+      details: request.body.details,
+    } as any);
   });
 
   api.delete('/api/pricing-quotes/:id', async (request) => {

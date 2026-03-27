@@ -4,6 +4,7 @@ import { useWindowStore } from '../../stores/windowStore';
 import { useEffect } from 'react';
 import { useStandards } from '../../hooks/useWindowApi';
 import { useMutation } from '@tanstack/react-query';
+import { useShallow } from 'zustand/react/shallow';
 
 const API_BASE = 'http://localhost:6002/api';
 
@@ -19,7 +20,17 @@ export const CalculationSettingsModal = ({ opened, onClose }: CalculationSetting
     unitWeight, setUnitWeight,
     identRules, setIdentRules,
     selectedStandardId
-  } = useWindowStore();
+  } = useWindowStore(useShallow((state) => ({
+    scaleFactor: state.scaleFactor,
+    setScaleFactor: state.setScaleFactor,
+    profileWidth: state.profileWidth,
+    setProfileWidth: state.setProfileWidth,
+    unitWeight: state.unitWeight,
+    setUnitWeight: state.setUnitWeight,
+    identRules: state.identRules,
+    setIdentRules: state.setIdentRules,
+    selectedStandardId: state.selectedStandardId,
+  })));
   
   const form = useForm({
     initialValues: {
@@ -139,7 +150,7 @@ export const CalculationSettingsModal = ({ opened, onClose }: CalculationSetting
           
           <TextInput
             label="窗户编号前缀"
-            description="例如输入 C，识别 C1515 等"
+            description="建议先只填真窗前缀，例如输入 C，识别 C1515 等"
             placeholder="通常为 C"
             {...form.getInputProps('windowPrefix')}
           />

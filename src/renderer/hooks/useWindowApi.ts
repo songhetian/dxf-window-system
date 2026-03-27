@@ -319,7 +319,7 @@ export const usePricingProducts = () => useQuery({
 export const useCreatePricingProduct = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string; pricingMode: 'area' | 'perimeter' | 'fixed'; items: { materialId: string; calcMode: 'area' | 'perimeter' | 'fixed'; quantity: number; sortOrder?: number }[] }) =>
+    mutationFn: async (data: { name: string; pricingMode: 'area' | 'perimeter' | 'fixed'; items: { materialId: string; calcMode: 'area' | 'perimeter' | 'fixed'; quantity: number; includeInComboTotal?: number; sortOrder?: number }[] }) =>
       fetchJson(`${API_BASE}/pricing-products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -344,7 +344,7 @@ export const useDeletePricingProduct = () => {
 export const useUpdatePricingProduct = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { id: string; name: string; pricingMode: 'area' | 'perimeter' | 'fixed'; items: { materialId: string; calcMode: 'area' | 'perimeter' | 'fixed'; quantity: number; sortOrder?: number }[] }) =>
+    mutationFn: async (data: { id: string; name: string; pricingMode: 'area' | 'perimeter' | 'fixed'; items: { materialId: string; calcMode: 'area' | 'perimeter' | 'fixed'; quantity: number; includeInComboTotal?: number; sortOrder?: number }[] }) =>
       fetchJson(`${API_BASE}/pricing-products/${data.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

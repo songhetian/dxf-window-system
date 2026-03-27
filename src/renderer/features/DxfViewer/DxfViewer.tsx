@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, memo } from 'react';
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, memo, useState } from 'react';
 import { Box, Center, Stack, Badge, Loader } from '@mantine/core';
 import { TransformWrapper, TransformComponent, ReactZoomPanPinchRef, useTransformEffect } from 'react-zoom-pan-pinch';
 import { useWindowStore } from '../../stores/windowStore';
@@ -43,6 +43,7 @@ const DxfViewerInner = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResu
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
   const lastStateRef = useRef<any>(null);
   const requestRef = useRef<number | undefined>(undefined);
+  const [minScale, setMinScale] = useState(0.001);
 
   const { activeWindowId } = useWindowStore(useShallow((state) => ({
     activeWindowId: state.activeWindowId,
@@ -60,6 +61,15 @@ const DxfViewerInner = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResu
     const ctx = canvas.getContext('2d', { alpha });
     if (!ctx) return null;
     return { ctx, dpr, w, h };
+  };
+
+  const canUseRect = (rect: DOMRect) => Number.isFinite(rect.width) && Number.isFinite(rect.height) && rect.width > 0 && rect.height > 0;
+  const isFiniteTransform = (x: number, y: number, scale: number) => (
+    Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(scale) && scale > 0
+  );
+  const setSafeTransform = (x: number, y: number, scale: number, animationTime = 0) => {
+    if (!transformRef.current || !isFiniteTransform(x, y, scale)) return;
+    transformRef.current.setTransform(x, y, scale, animationTime);
   };
 
   const drawBase = useCallback((state: { scale: number; positionX: number; positionY: number }) => {
@@ -165,18 +175,20 @@ const DxfViewerInner = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResu
     if (!processedResult?.bounds || !transformRef.current || !containerRef.current) return;
     const { bounds } = processedResult;
     const rect = containerRef.current.getBoundingClientRect();
+    if (!canUseRect(rect)) return;
     
     const scaleX = (rect.width - 40) / (bounds.width || 1);
     const scaleY = (rect.height - 40) / (bounds.height || 1);
     let scale = Math.min(scaleX, scaleY);
     
     if (isNaN(scale) || !isFinite(scale) || scale <= 0) scale = 1;
+    setMinScale(Math.max(scale * 0.75, 0.0005));
     
     // 初始化位置：将图纸中心 (0,0) 放置在屏幕中心
     const initialX = rect.width / 2;
     const initialY = rect.height / 2;
     
-    transformRef.current.setTransform(initialX, initialY, scale, 0);
+    setSafeTransform(initialX, initialY, scale, 0);
     // 立即手动触发一次重绘，确保不闪烁
     drawBase({ scale, positionX: initialX, positionY: initialY });
     drawOverlay({ scale, positionX: initialX, positionY: initialY });
@@ -186,25 +198,28 @@ const DxfViewerInner = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResu
     reset: zoomToFit, 
     zoomToWindow: (win: WindowItem) => {
       if (!transformRef.current || !containerRef.current) return;
+      if (!win.points?.length || !Number.isFinite(win.width) || !Number.isFinite(win.height) || win.width <= 0 || win.height <= 0) return;
       const rect = containerRef.current.getBoundingClientRect();
+      if (!canUseRect(rect)) return;
       const pts = win.points;
       const cx = pts.reduce((a, b) => a + b.x, 0) / pts.length;
       const cy = pts.reduce((a, b) => a + b.y, 0) / pts.length;
       
-      const targetScale = Math.min(rect.width / (win.width * 2.5), rect.height / (win.height * 2.5), 0.2);
+      const targetScale = Math.max(minScale, Math.min(rect.width / (win.width * 2.5), rect.height / (win.height * 2.5), 0.2));
       const px = rect.width / 2 - cx * targetScale;
       const py = rect.height / 2 + cy * targetScale;
       
-      transformRef.current.setTransform(px, py, targetScale, 500);
+      setSafeTransform(px, py, targetScale, 500);
     },
     zoomToMarker: (marker: RecognitionMarker) => {
       if (!transformRef.current || !containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const targetScale = 0.12;
+      if (!canUseRect(rect) || !Number.isFinite(marker.x) || !Number.isFinite(marker.y)) return;
+      const targetScale = Math.max(minScale, 0.12);
       const px = rect.width / 2 - marker.x * targetScale;
       const py = rect.height / 2 + marker.y * targetScale;
 
-      transformRef.current.setTransform(px, py, targetScale, 500);
+      setSafeTransform(px, py, targetScale, 500);
     },
   }));
 
@@ -218,10 +233,11 @@ const DxfViewerInner = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResu
     const timeoutId = window.setTimeout(() => {
       if (focusedMarker) {
         const rect = containerRef.current?.getBoundingClientRect();
-        const targetScale = rect ? Math.min(Math.max(rect.width / 4000, 0.05), 0.2) : 0.12;
+        if (!rect || !canUseRect(rect) || !Number.isFinite(focusedMarker.x) || !Number.isFinite(focusedMarker.y)) return;
+        const targetScale = rect ? Math.max(minScale, Math.min(Math.max(rect.width / 4000, 0.05), 0.2)) : Math.max(minScale, 0.12);
         const px = (rect?.width || 0) / 2 - focusedMarker.x * targetScale;
         const py = (rect?.height || 0) / 2 + focusedMarker.y * targetScale;
-        transformRef.current?.setTransform(px, py, targetScale, 500);
+        setSafeTransform(px, py, targetScale, 500);
       }
     }, 0);
     return () => window.clearTimeout(timeoutId);
@@ -254,13 +270,14 @@ const DxfViewerInner = forwardRef<DxfViewerRef, DxfViewerProps>(({ processedResu
     <Box ref={containerRef} style={{ width: '100%', height: '100%', overflow: 'hidden', background: '#fff', position: 'relative' }}>
       <TransformWrapper 
         ref={transformRef} 
-        minScale={0.00001} 
+        minScale={minScale} 
         maxScale={200} 
         initialScale={1}
         centerOnInit={false}
         limitToBounds={false}
         doubleClick={{ disabled: true }}
-        wheel={{ step: 0.1 }}
+        wheel={{ step: 0.04 }}
+        panning={{ disabled: !processedResult }}
       >
         <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
           <Box style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none' }}>

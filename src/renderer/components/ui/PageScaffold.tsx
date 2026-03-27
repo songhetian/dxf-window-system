@@ -12,22 +12,26 @@ export const PageScaffold = ({
   actions?: ReactNode;
   children: ReactNode;
 }) => (
-  <Box h="100%" p={16} className="no-drag">
-    <Stack h="100%" gap="md">
+  <Box h="100%" p={8} className="no-drag">
+    <Stack h="100%" gap={6}>
       <Paper
-        p="lg"
-        radius={12}
+        p={6}
+        radius={8}
         withBorder
         style={{ background: '#fff' }}
       >
-        <Group justify="space-between" align="flex-start" gap="md">
-          <Box>
-            <Title order={3}>{title}</Title>
-            <Text size="sm" c="dimmed" mt={6}>
-              {description}
-            </Text>
+        <Group justify="space-between" align="center" gap="xs" wrap="nowrap">
+          <Box style={{ minWidth: 0, flex: 1 }}>
+            <Group gap={6} wrap="nowrap" align="baseline">
+              <Title order={6}>{title}</Title>
+              <Text size="10px" c="dimmed" truncate>
+                {description}
+              </Text>
+            </Group>
           </Box>
-          {actions}
+          <Box style={{ flexShrink: 0 }}>
+            {actions}
+          </Box>
         </Group>
       </Paper>
       <Box style={{ flex: 1, minHeight: 0 }}>{children}</Box>

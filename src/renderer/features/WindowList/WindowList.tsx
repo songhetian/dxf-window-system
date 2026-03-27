@@ -1,4 +1,4 @@
-import { Paper, Stack, Text, Badge, Group, ActionIcon, Collapse, Divider, Box, Grid, ThemeIcon } from '@mantine/core';
+import { Paper, Stack, Text, Badge, Group, ActionIcon, Collapse, Box, Grid, ThemeIcon } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconTrash, IconEdit, IconChevronDown, IconChevronUp, IconFocus, IconDimensions, IconBookmark } from '@tabler/icons-react';
 import { useMemo, memo, useRef } from 'react';
@@ -9,16 +9,20 @@ import { useShallow } from 'zustand/react/shallow';
 
 interface WindowListProps {
   windows: WindowItem[];
+  labelCodeStats?: Array<{ code: string; rawCount: number; matchedCount: number }>;
   onDelete: (id: string) => void;
   onEdit: (window: WindowItem) => void;
   onFocus?: (window: WindowItem) => void;
 }
 
-export const WindowList = ({ windows, onDelete, onEdit, onFocus }: WindowListProps) => {
+export const WindowList = ({ windows, labelCodeStats = [], onDelete, onEdit, onFocus }: WindowListProps) => {
+  const labelStatMap = useMemo(
+    () => new Map(labelCodeStats.map((item) => [item.code, item])),
+    [labelCodeStats],
+  );
   const groupedWindows = useMemo(() => {
     const groups: Record<string, { key: string; items: WindowItem[]; width: number; height: number; shapeType: string; totalArea: number; totalPerimeter: number }> = {};
     windows.forEach((win) => {
-      // 关键改进：优先使用名称作为分组键 (如 C1515)
       const groupKey = win.name || `${Math.round(win.width)}-${Math.round(win.height)}`;
       if (!groups[groupKey]) {
         groups[groupKey] = { 
@@ -30,7 +34,10 @@ export const WindowList = ({ windows, onDelete, onEdit, onFocus }: WindowListPro
       groups[groupKey].totalArea += win.area;
       groups[groupKey].totalPerimeter += win.perimeter || 0;
     });
-    return Object.values(groups).sort((a, b) => b.items.length - a.items.length);
+    return Object.values(groups).sort((a, b) => {
+      if (b.items.length !== a.items.length) return b.items.length - a.items.length;
+      return a.key.localeCompare(b.key, 'zh-CN');
+    });
   }, [windows]);
 
   if (windows.length === 0) {
@@ -44,7 +51,7 @@ export const WindowList = ({ windows, onDelete, onEdit, onFocus }: WindowListPro
         data={groupedWindows}
         itemContent={(index, group) => (
           <Box p="xs" pt={index === 0 ? 'xs' : 0}>
-             <WindowGroupCard group={group} onDelete={onDelete} onEdit={onEdit} onFocus={onFocus} />
+             <WindowGroupCard group={group} labelStat={labelStatMap.get(group.key)} onDelete={onDelete} onEdit={onEdit} onFocus={onFocus} />
           </Box>
         )}
       />
@@ -62,7 +69,7 @@ const DataTag = memo(({ label, value, unit, color = "gray" }: { label: string; v
   </Box>
 ));
 
-const WindowGroupCard = memo(({ group, onDelete, onEdit, onFocus }: { group: any, onDelete: any, onEdit: any, onFocus?: any }) => {
+const WindowGroupCard = memo(({ group, labelStat, onDelete, onEdit, onFocus }: { group: any, labelStat?: { code: string; rawCount: number; matchedCount: number }, onDelete: any, onEdit: any, onFocus?: any }) => {
   const [opened, { toggle }] = useDisclosure(false);
   const { unit, setActiveWindowId, activeWindowId } = useWindowStore(useShallow((state) => ({
     unit: state.unit,
@@ -92,14 +99,24 @@ const WindowGroupCard = memo(({ group, onDelete, onEdit, onFocus }: { group: any
               <ThemeIcon variant="light" size="sm" color={isSample ? "orange" : "blue"}>
                 {isSample ? <IconBookmark size={14} /> : <IconDimensions size={14} />}
               </ThemeIcon>
-              <Text size="sm" fw={800} color={isSample ? "orange.9" : "blue.9"} style={{ whiteSpace: 'nowrap' }}>
-                {isSample ? '[大样] ' : ''}规格: {formatUnit(group.width, unit)} × {formatUnit(group.height, unit)}
-              </Text>
+              <Stack gap={0}>
+                <Text size="sm" fw={800} color={isSample ? "orange.9" : "blue.9"} style={{ lineHeight: 1.2 }}>
+                  {isSample ? '[大样] ' : ''}{group.key}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {formatUnit(group.width, unit)} × {formatUnit(group.height, unit)} · {group.shapeType}
+                </Text>
+              </Stack>
             </Group>
             <Badge size="sm" variant="filled" color={isSample ? "orange" : "blue"} radius="sm">
-              {group.items.length}
+              {group.items.length} 樘
             </Badge>
           </Group>
+          {labelStat ? (
+            <Text size="xs" c={labelStat.rawCount > labelStat.matchedCount ? 'orange.8' : 'dimmed'}>
+              原图 {labelStat.rawCount} / 识别 {labelStat.matchedCount}
+            </Text>
+          ) : null}
           <Grid gutter="xs">
             <Grid.Col span={6}><DataTag label="累计面积" value={formatUnit(group.totalArea, unit)} unit={areaSym} color="blue" /></Grid.Col>
             <Grid.Col span={6}><DataTag label="累计周长" value={formatUnit(group.totalPerimeter, unit)} unit={unitSym} color="blue" /></Grid.Col>
@@ -154,7 +171,10 @@ const WindowItemCard = memo(({ win, idx, unit, unitSym, areaSym, activeWindowId,
   >
     <Stack gap={6}>
       <Group justify="space-between" wrap="nowrap">
-        <Text size="xs" fw={700} truncate>#{idx + 1} {win.name}</Text>
+        <Stack gap={0}>
+          <Text size="xs" fw={700} truncate>{win.name}</Text>
+          <Text size="10px" c="dimmed">#{idx + 1}</Text>
+        </Stack>
         <Group gap={4}>
           <ActionIcon size="sm" variant="subtle" onClick={(e) => {
             e.stopPropagation();
@@ -168,6 +188,7 @@ const WindowItemCard = memo(({ win, idx, unit, unitSym, areaSym, activeWindowId,
         </Group>
       </Group>
       <Grid gutter={4}>
+        <Grid.Col span={12}><DataTag label="类型" value={win.shapeType} unit="" /></Grid.Col>
         <Grid.Col span={6}><DataTag label="面积" value={formatUnit(win.area, unit)} unit={areaSym} /></Grid.Col>
         <Grid.Col span={6}><DataTag label="周长" value={formatUnit(win.perimeter || 0, unit)} unit={unitSym} /></Grid.Col>
         <Grid.Col span={4}><DataTag label="Handle" value={win.handle || '-'} unit="" /></Grid.Col>

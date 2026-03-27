@@ -4,6 +4,7 @@ import { ReactNode, useState } from 'react';
 import { useWindowStore } from '../../stores/windowStore';
 import { IconSettings } from '@tabler/icons-react';
 import { CalculationSettingsModal } from '../../features/DxfViewer/CalculationSettingsModal';
+import { useShallow } from 'zustand/react/shallow';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -14,7 +15,10 @@ interface AppLayoutProps {
 export const AppLayout = ({ children, navbar, headerTitle }: AppLayoutProps) => {
   const [opened, { toggle }] = useDisclosure();
   const [settingsOpened, { open, close }] = useDisclosure(false);
-  const { unit, setUnit } = useWindowStore();
+  const { unit, setUnit } = useWindowStore(useShallow((state) => ({
+    unit: state.unit,
+    setUnit: state.setUnit,
+  })));
 
   return (
     <>

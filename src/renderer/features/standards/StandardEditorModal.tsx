@@ -10,6 +10,8 @@ import {
 } from '@mantine/core';
 
 export const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const LABEL_SEPARATOR_PATTERN = `[\\s_\\-－–—'’‘\`′＇"“”″]*`;
+const LABEL_SUFFIX_PATTERN = `(?:${LABEL_SEPARATOR_PATTERN}[A-Z\\u4E00-\\u9FFF]{0,2})?${LABEL_SEPARATOR_PATTERN}`;
 
 export const buildPatternFromPrefixes = (rawPrefix: string, mode: string) => {
   const prefixes = rawPrefix
@@ -22,15 +24,15 @@ export const buildPatternFromPrefixes = (rawPrefix: string, mode: string) => {
     ? `(?:${prefixes.map(escapeRegex).join('|')})`
     : escapeRegex(prefixes[0] || 'C');
 
-  if (mode === 'standard') return `^${source}\\d{4}$`;
-  if (mode === 'flexible') return `^${source}\\d+$`;
-  return `.*${source}.*`;
+  if (mode === 'standard') return `^${source}${LABEL_SEPARATOR_PATTERN}\\d{4}${LABEL_SUFFIX_PATTERN}$`;
+  if (mode === 'flexible') return `^${source}${LABEL_SEPARATOR_PATTERN}\\d+${LABEL_SUFFIX_PATTERN}$`;
+  return `.*${source}${LABEL_SEPARATOR_PATTERN}\\d+${LABEL_SUFFIX_PATTERN}.*`;
 };
 
 export const defaultStandardForm = {
   name: '',
   prefix: 'C',
-  mode: 'standard',
+  mode: 'flexible',
   wallAreaThreshold: 4,
   minWindowArea: 0.08,
   minSideLength: 180,
@@ -84,27 +86,27 @@ export const StandardEditorModal = ({
           placeholder="例如：幕墙项目标准"
         />
         <TextInput
-          label="窗编号开头"
-          description="直接填你图纸里常见的编号开头，多个用逗号隔开，例如：C,CT"
+          label="编号前缀"
+          description="先只填真窗前缀，例如：C。空格、反、' 这类变体会自动识别，不用单独拆规则。"
           value={form.prefix}
           onChange={(event) => update('prefix', event.currentTarget.value.toUpperCase())}
-          placeholder="例如：C,CT"
+          placeholder="例如：C"
         />
         <Group gap="xs">
           <Button variant="default" size="xs" onClick={() => update('prefix', 'C')}>常用：C</Button>
-          <Button variant="default" size="xs" onClick={() => update('prefix', 'CT')}>常用：CT</Button>
-          <Button variant="default" size="xs" onClick={() => update('prefix', 'C,CT')}>常用：C,CT</Button>
+          <Button variant="default" size="xs" onClick={() => update('prefix', 'TC')}>常用：TC</Button>
+          <Button variant="default" size="xs" onClick={() => update('prefix', 'C,TC')}>组合：C,TC</Button>
         </Group>
         <SegmentedControl
           value={form.mode}
           onChange={(next) => update('mode', next)}
           data={[
             { label: '固定4位数字', value: 'standard' },
-            { label: '任意位数字', value: 'flexible' },
-            { label: '只要包含开头', value: 'contains' },
+            { label: '任意位数字(推荐)', value: 'flexible' },
+            { label: '只要包含前缀', value: 'contains' },
           ]}
         />
-        <TextInput label="系统生成的识别规则" value={pattern} readOnly />
+        <TextInput label="规则预览" value={pattern} readOnly />
         <NumberInput
           label="墙体面积阈值 (㎡)"
           description="超过该面积的闭合轮廓会被当成墙体包络，用来判断真窗 / 大样"

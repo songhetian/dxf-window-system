@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActionIcon,
+  Badge,
   Box,
   Button,
   Group,
@@ -27,6 +28,7 @@ import {
 } from '../hooks/useWindowApi';
 import { PageScaffold } from '../components/ui/PageScaffold';
 import { useWindowStore } from '../stores/windowStore';
+import { useShallow } from 'zustand/react/shallow';
 
 const exportExcel = (rows: Record<string, string | number>[], fileName: string) => {
   const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -41,7 +43,9 @@ const RecordsPage = () => {
   const { data: quotes = [] } = usePricingQuotes();
   const deleteDrawing = useDeleteDrawing();
   const deleteQuote = useDeletePricingQuote();
-  const { setPricingDraft } = useWindowStore();
+  const { setPricingDraft } = useWindowStore(useShallow((state) => ({
+    setPricingDraft: state.setPricingDraft,
+  })));
   const [keyword, setKeyword] = useState('');
   const [selectedQuote, setSelectedQuote] = useState<any | null>(null);
 
@@ -51,7 +55,7 @@ const RecordsPage = () => {
   );
 
   const filteredQuotes = useMemo(
-    () => quotes.filter((item) => `${item.name} ${item.productName || ''}`.toLowerCase().includes(keyword.toLowerCase())),
+    () => quotes.filter((item) => `${item.name} ${item.productName || ''} ${item.items?.map((line: any) => line.productName || '').join(' ') || ''}`.toLowerCase().includes(keyword.toLowerCase())),
     [keyword, quotes],
   );
 
@@ -148,9 +152,9 @@ const RecordsPage = () => {
                   onClick={() => exportExcel(filteredQuotes.map((item) => ({
                     名称: item.name,
                     产品: item.productName || '',
-                    宽度: item.width,
-                    高度: item.height,
-                    数量: item.quantity,
+                    组合数: item.items?.length || 0,
+                    总面积: item.area,
+                    总周长: item.perimeter,
                     成本总额: item.costTotal,
                     销售总额: item.retailTotal,
                     创建时间: item.createdAt || '',
@@ -164,9 +168,9 @@ const RecordsPage = () => {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>名称</Table.Th>
-                      <Table.Th>产品</Table.Th>
-                      <Table.Th>尺寸</Table.Th>
-                      <Table.Th>数量</Table.Th>
+                      <Table.Th>组合</Table.Th>
+                      <Table.Th>组合数</Table.Th>
+                      <Table.Th>总面积</Table.Th>
                       <Table.Th>成本</Table.Th>
                       <Table.Th>销售</Table.Th>
                       <Table.Th>创建时间</Table.Th>
@@ -178,8 +182,8 @@ const RecordsPage = () => {
                       <Table.Tr key={item.id}>
                         <Table.Td>{item.name}</Table.Td>
                         <Table.Td>{item.productName || '-'}</Table.Td>
-                        <Table.Td>{item.width} × {item.height}</Table.Td>
-                        <Table.Td>{item.quantity}</Table.Td>
+                        <Table.Td>{item.items?.length || 0}</Table.Td>
+                        <Table.Td>{item.area.toFixed(3)} ㎡</Table.Td>
                         <Table.Td>{item.costTotal.toFixed(2)}</Table.Td>
                         <Table.Td>{item.retailTotal.toFixed(2)}</Table.Td>
                         <Table.Td>{item.createdAt ? new Date(item.createdAt).toLocaleString() : '-'}</Table.Td>
@@ -192,12 +196,13 @@ const RecordsPage = () => {
                               variant="subtle"
                               size="compact-sm"
                               onClick={() => {
+                                const firstLine = item.items?.[0];
                                 setPricingDraft({
                                   sourceName: item.name,
-                                  width: item.width,
-                                  height: item.height,
-                                  quantity: item.quantity,
-                                  productId: item.productId || null,
+                                  width: firstLine?.width || item.width,
+                                  height: firstLine?.height || item.height,
+                                  quantity: firstLine?.quantity || item.quantity,
+                                  productId: firstLine?.productId || item.productId || null,
                                 });
                                 navigate('/pricing');
                               }}
@@ -239,37 +244,54 @@ const RecordsPage = () => {
                 <Text fw={700}>{selectedQuote.name}</Text>
               </Paper>
               <Paper withBorder p="sm" radius={10}>
-                <Text size="sm" c="dimmed">产品</Text>
+                <Text size="sm" c="dimmed">组合概览</Text>
                 <Text fw={700}>{selectedQuote.productName || '-'}</Text>
               </Paper>
               <Paper withBorder p="sm" radius={10}>
-                <Text size="sm" c="dimmed">尺寸 / 数量</Text>
-                <Text fw={700}>{selectedQuote.width} × {selectedQuote.height} / {selectedQuote.quantity}</Text>
+                <Text size="sm" c="dimmed">汇总</Text>
+                <Text fw={700}>{selectedQuote.items?.length || 0} 条 / {selectedQuote.area.toFixed(3)}㎡ / {selectedQuote.retailTotal.toFixed(2)}</Text>
               </Paper>
             </Group>
 
-            <Table>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>项目</Table.Th>
-                  <Table.Th>数量</Table.Th>
-                  <Table.Th>单位</Table.Th>
-                  <Table.Th>成本</Table.Th>
-                  <Table.Th>销售</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {selectedQuote.details.map((detail: any, index: number) => (
-                  <Table.Tr key={`${detail.name}-${index}`}>
-                    <Table.Td>{detail.name}</Table.Td>
-                    <Table.Td>{detail.quantity.toFixed(3)}</Table.Td>
-                    <Table.Td>{detail.unit}</Table.Td>
-                    <Table.Td>{detail.costSubtotal.toFixed(2)}</Table.Td>
-                    <Table.Td>{detail.retailSubtotal.toFixed(2)}</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+            <Stack gap="sm">
+              {(selectedQuote.items || []).map((line: any, lineIndex: number) => (
+                <Paper key={line.id || lineIndex} withBorder p="sm" radius={10}>
+                  <Stack gap="sm">
+                    <Group justify="space-between">
+                      <Box>
+                        <Text fw={700}>{line.sourceName || line.productName || `组合 ${lineIndex + 1}`}</Text>
+                        <Text size="sm" c="dimmed">{line.productName || '-'} / {line.width} × {line.height} / 数量 {line.quantity}</Text>
+                      </Box>
+                      <Badge variant="light">{line.retailTotal?.toFixed(2)}</Badge>
+                    </Group>
+                    <Table>
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th>项目</Table.Th>
+                          <Table.Th>分类</Table.Th>
+                          <Table.Th>数量</Table.Th>
+                          <Table.Th>单位</Table.Th>
+                          <Table.Th>成本</Table.Th>
+                          <Table.Th>销售</Table.Th>
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {(line.details || []).map((detail: any, index: number) => (
+                          <Table.Tr key={`${detail.name}-${index}`}>
+                            <Table.Td>{detail.name}</Table.Td>
+                            <Table.Td>{detail.categoryName || detail.sourceType || '-'}</Table.Td>
+                            <Table.Td>{detail.quantity.toFixed(3)}</Table.Td>
+                            <Table.Td>{detail.unit}</Table.Td>
+                            <Table.Td>{detail.costSubtotal.toFixed(2)}</Table.Td>
+                            <Table.Td>{detail.retailSubtotal.toFixed(2)}</Table.Td>
+                          </Table.Tr>
+                        ))}
+                      </Table.Tbody>
+                    </Table>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
           </Stack>
         ) : null}
       </Modal>

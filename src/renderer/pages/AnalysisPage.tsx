@@ -15,6 +15,7 @@ import {
   ScrollArea,
   Select,
   Stack,
+  Tabs,
   Text,
   TextInput,
   Title,
@@ -53,9 +54,10 @@ const AnalysisPage = () => {
   const { processedResult, pendingWindows, fileName, processDxf, rerunRecognition, isProcessing, progress, saveToDb, clear } = useDxfProcessor();
   const { data: standards = [] } = useStandards();
   const createStandard = useCreateStandard();
-  const { activeWindowId, selectedStandardId, setSelectedStandardId, setIdentRules, setPricingDraft, addPricingQueueItem } = useWindowStore(useShallow((state) => ({
+  const { activeWindowId, selectedStandardId, identRules, setSelectedStandardId, setIdentRules, setPricingDraft, addPricingQueueItem } = useWindowStore(useShallow((state) => ({
     activeWindowId: state.activeWindowId,
     selectedStandardId: state.selectedStandardId,
+    identRules: state.identRules,
     setSelectedStandardId: state.setSelectedStandardId,
     setIdentRules: state.setIdentRules,
     setPricingDraft: state.setPricingDraft,
@@ -70,8 +72,7 @@ const AnalysisPage = () => {
   const [focusedMarker, setFocusedMarker] = useState<{ text: string; x: number; y: number; layer: string } | null>(null);
   const [showRecognitionReport, setShowRecognitionReport] = useState(false);
   const [showWindowList, setShowWindowList] = useState(false);
-  const [showAllExcludedLayers, setShowAllExcludedLayers] = useState(false);
-  const [showAllUnmatchedMarkers, setShowAllUnmatchedMarkers] = useState(false);
+  const [processingExcludedLayer, setProcessingExcludedLayer] = useState<string | null>(null);
   const lastMarkerFocusRef = useRef<{ key: string; at: number } | null>(null);
   const lastExcludedToggleRef = useRef<{ key: string; at: number } | null>(null);
 
@@ -91,9 +92,6 @@ const AnalysisPage = () => {
   useEffect(() => {
     setShowRecognitionReport(false);
     setShowWindowList(false);
-    setShowAllExcludedLayers(false);
-    setShowAllUnmatchedMarkers(false);
-
     if (!processedResult) return;
 
     const reportTimer = window.setTimeout(() => {
@@ -141,6 +139,7 @@ const AnalysisPage = () => {
       onConfirm: () => {
         setEnabledExcludedLayers([]);
         setFocusedMarker(null);
+        setProcessingExcludedLayer(null);
         clear();
         setImportKey((value) => value + 1);
       },
@@ -171,6 +170,7 @@ const AnalysisPage = () => {
   }, [focusedMarker]);
 
   const toggleExcludedLayer = useCallback(async (layer: string) => {
+    if (processingExcludedLayer) return;
     const now = Date.now();
     if (lastExcludedToggleRef.current?.key === layer && now - lastExcludedToggleRef.current.at < 300) {
       return;
@@ -184,8 +184,13 @@ const AnalysisPage = () => {
       setEnabledExcludedLayers(nextLayers);
       setFocusedMarker(null);
     });
-    await rerunRecognition(nextLayers);
-  }, [enabledExcludedLayers, rerunRecognition]);
+    setProcessingExcludedLayer(layer);
+    try {
+      await rerunRecognition(nextLayers);
+    } finally {
+      setProcessingExcludedLayer(null);
+    }
+  }, [enabledExcludedLayers, processingExcludedLayer, rerunRecognition]);
 
   const handleCreateStandard = useCallback(async (form: StandardFormValue) => {
     if (!form.name.trim()) {
@@ -247,8 +252,8 @@ const AnalysisPage = () => {
         </Group>
       }
     >
-      <Box h="100%" style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: 12 }}>
-        <Paper withBorder radius={12} p="md" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <Box h="100%" style={{ display: 'grid', gridTemplateColumns: '420px minmax(0, 1fr)', gap: 12 }}>
+        <Paper withBorder radius={12} p="md" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
           <Stack gap="md" style={{ flex: 1, minHeight: 0 }}>
             <Box>
               <Group justify="space-between" align="center">
@@ -263,186 +268,278 @@ const AnalysisPage = () => {
               </Text>
             </Box>
 
-            {recognitionSummary && showRecognitionReport ? (
-              <Paper withBorder radius={12} p="sm" bg="#f8fafc">
-                <Stack gap="xs">
-                  <Group justify="space-between" align="center">
-                    <Text fw={600} size="sm">识别报告</Text>
-                    <Badge color={recognitionSummary.unmatchedLabels.length > 0 ? 'yellow' : 'teal'} variant="light">
-                      {recognitionSummary.matchedLabels} / {recognitionSummary.totalLabels}
-                    </Badge>
-                  </Group>
-                  <Text size="xs" c="dimmed">
-                    参与图层：{recognitionSummary.activeEntityLayers.slice(0, 4).join('、') || '无'}
-                  </Text>
-                  <Divider />
-                  <Box>
-                    <Group justify="space-between" align="center" mb={6}>
-                      <Text size="xs" fw={600}>被排除图层</Text>
-                      <Text size="xs" c="dimmed">临时启用后会重新试识别</Text>
-                    </Group>
-                    {recognitionSummary.excludedLayerDetails.length > 0 ? (
-                      <ScrollArea.Autosize mah={108} type="auto">
-                        <Stack gap={6}>
-                          {(showAllExcludedLayers
-                            ? recognitionSummary.excludedLayerDetails
-                            : recognitionSummary.excludedLayerDetails.slice(0, 8)
-                          ).map((item) => {
-                            const isEnabled = enabledExcludedLayers.includes(item.layer);
-                            return (
-                              <Button
-                                key={item.layer}
-                                fullWidth
-                                justify="space-between"
-                                size="compact-sm"
-                                variant={isEnabled ? 'filled' : 'light'}
-                                color={isEnabled ? 'blue' : 'gray'}
-                                onClick={() => toggleExcludedLayer(item.layer)}
-                                loading={isProcessing}
-                              >
-                                {item.layer} {isEnabled ? '已启用' : '已排除'} ({item.entityCount}{item.labelCount > 0 ? ` / 标注${item.labelCount}` : ''})
-                              </Button>
-                            );
-                          })}
-                          {recognitionSummary.excludedLayerDetails.length > 8 ? (
-                            <Button
-                              variant="subtle"
-                              size="compact-xs"
-                              onClick={() => setShowAllExcludedLayers((value) => !value)}
-                            >
-                              {showAllExcludedLayers ? '收起图层' : `展开剩余 ${recognitionSummary.excludedLayerDetails.length - 8} 项`}
-                            </Button>
-                          ) : null}
-                        </Stack>
-                      </ScrollArea.Autosize>
-                    ) : (
-                      <Text size="xs" c="dimmed">无</Text>
-                    )}
+            <Tabs defaultValue="windows" keepMounted={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <Tabs.List grow>
+                <Tabs.Tab value="windows">识别结果</Tabs.Tab>
+                <Tabs.Tab value="report" rightSection={recognitionSummary ? (
+                  <Badge size="xs" variant="light" color={recognitionSummary.unmatchedLabels.length > 0 ? 'yellow' : 'teal'}>
+                    {recognitionSummary.matchedLabels} / {recognitionSummary.totalLabels}
+                  </Badge>
+                ) : null}>识别报告</Tabs.Tab>
+              </Tabs.List>
+
+              <Tabs.Panel value="windows" pt="sm" style={{ flex: 1, minHeight: 0 }}>
+                <Stack gap="sm" style={{ height: '100%', minHeight: 0 }}>
+                  <Box style={{ flex: 1, minHeight: 0 }}>
+                    {showWindowList ? (
+                      <WindowList
+                        windows={deferredPendingWindows as WindowItem[]}
+                        labelCodeStats={recognitionSummary?.labelCodeStats ?? []}
+                        onDelete={() => undefined}
+                        onEdit={() => undefined}
+                        onFocus={(item) => viewerRef.current?.zoomToWindow(item)}
+                      />
+                    ) : processedResult ? (
+                      <Paper withBorder radius={12} p="sm">
+                        <Text size="xs" c="dimmed">窗列表加载中...</Text>
+                      </Paper>
+                    ) : null}
                   </Box>
-                  <Divider />
-                  <Box>
-                    <Group justify="space-between" align="center" mb={6}>
-                      <Text size="xs" fw={600}>未匹配编号</Text>
-                      <Text size="xs" c="dimmed">点击后直接定位问题标注</Text>
+
+                  {deferredPendingWindows.length > 0 ? (
+                    <Group grow>
+                      <Button
+                        variant="default"
+                        onClick={() => {
+                          if (!activeWindow) return;
+                          setPricingDraft({
+                            sourceName: activeWindow.name,
+                            width: activeWindow.width,
+                            height: activeWindow.height,
+                            quantity: 1,
+                          });
+                          navigate('/pricing');
+                        }}
+                      >
+                        带入报价
+                      </Button>
+                      <Button
+                        variant="light"
+                        onClick={() => {
+                          if (!activeWindow) return;
+                          addPricingQueueItem({
+                            id: activeWindow.id || crypto.randomUUID(),
+                            sourceName: activeWindow.name,
+                            width: activeWindow.width,
+                            height: activeWindow.height,
+                            quantity: 1,
+                          });
+                          navigate('/pricing');
+                        }}
+                      >
+                        加入准备区
+                      </Button>
+                      <Button
+                        leftSection={<IconDeviceFloppy size={16} />}
+                        onClick={() => {
+                          setDrawingTitle(fileName.replace('.dxf', ''));
+                          setSaveOpened(true);
+                        }}
+                      >
+                        保存结果
+                      </Button>
                     </Group>
-                    {recognitionSummary.unmatchedLabelMarkers.length > 0 ? (
-                      <ScrollArea.Autosize mah={140} type="auto">
-                        <Stack gap={6}>
-                          {(showAllUnmatchedMarkers
-                            ? recognitionSummary.unmatchedLabelMarkers
-                            : recognitionSummary.unmatchedLabelMarkers.slice(0, 12)
-                          ).map((marker, index) => {
-                            const isFocused = focusedMarker?.text === marker.text
-                              && focusedMarker?.x === marker.x
-                              && focusedMarker?.y === marker.y;
-                            return (
-                              <Button
-                                key={`${marker.text}-${marker.x}-${marker.y}-${index}`}
-                                fullWidth
-                                justify="space-between"
-                                size="compact-sm"
-                                variant={isFocused ? 'filled' : 'light'}
-                                color={isFocused ? 'red' : 'yellow'}
-                                onClick={() => focusUnmatchedMarker(marker)}
-                              >
-                                {marker.text}
-                              </Button>
-                            );
-                          })}
-                          {recognitionSummary.unmatchedLabelMarkers.length > 12 ? (
-                            <Button
-                              variant="subtle"
-                              size="compact-xs"
-                              onClick={() => setShowAllUnmatchedMarkers((value) => !value)}
-                            >
-                              {showAllUnmatchedMarkers ? '收起编号' : `展开剩余 ${recognitionSummary.unmatchedLabelMarkers.length - 12} 项`}
-                            </Button>
-                          ) : null}
-                        </Stack>
-                      </ScrollArea.Autosize>
-                    ) : (
-                      <Text size="xs" c="dimmed">无</Text>
-                    )}
-                  </Box>
+                  ) : null}
                 </Stack>
-              </Paper>
-            ) : recognitionSummary ? (
-              <Paper withBorder radius={12} p="sm" bg="#f8fafc">
-                <Text size="xs" c="dimmed">识别报告加载中...</Text>
-              </Paper>
-            ) : null}
+              </Tabs.Panel>
 
-            <Box style={{ flex: 1, minHeight: 0 }}>
-              {showWindowList ? (
-                <WindowList windows={deferredPendingWindows as WindowItem[]} onDelete={() => undefined} onEdit={() => undefined} onFocus={(item) => viewerRef.current?.zoomToWindow(item)} />
-              ) : processedResult ? (
-                <Paper withBorder radius={12} p="sm">
-                  <Text size="xs" c="dimmed">窗列表加载中...</Text>
-                </Paper>
-              ) : null}
-            </Box>
+              <Tabs.Panel value="report" pt="sm" style={{ flex: 1, minHeight: 0 }}>
+                {recognitionSummary && showRecognitionReport ? (
+                  <Paper withBorder radius={12} p="sm" bg="#f8fafc" style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                    <Stack gap="xs" style={{ flex: 1, minHeight: 0 }}>
+                      <Text size="xs" c="dimmed">
+                        识别结果 {recognitionSummary.matchedLabels} 项 / 候选编号 {recognitionSummary.totalLabels} 项
+                      </Text>
+                      <Tabs defaultValue="diagnostic" keepMounted={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                        <Tabs.List grow>
+                          <Tabs.Tab value="diagnostic">诊断结果</Tabs.Tab>
+                          <Tabs.Tab value="layers">识别图层</Tabs.Tab>
+                          <Tabs.Tab value="excluded">被排除图层</Tabs.Tab>
+                          <Tabs.Tab value="unmatched">未匹配编号</Tabs.Tab>
+                        </Tabs.List>
 
-            {deferredPendingWindows.length > 0 ? (
-              <Stack gap="xs">
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    if (!activeWindow) return;
-                    setPricingDraft({
-                      sourceName: activeWindow.name,
-                      width: activeWindow.width,
-                      height: activeWindow.height,
-                      quantity: 1,
-                    });
-                    navigate('/pricing');
-                  }}
-                >
-                  带入报价中心
-                </Button>
-                <Button
-                  variant="light"
-                  onClick={() => {
-                    if (!activeWindow) return;
-                    addPricingQueueItem({
-                      id: activeWindow.id || crypto.randomUUID(),
-                      sourceName: activeWindow.name,
-                      width: activeWindow.width,
-                      height: activeWindow.height,
-                      quantity: 1,
-                    });
-                    navigate('/pricing');
-                  }}
-                >
-                  加入报价准备区
-                </Button>
-                <Button
-                  variant="light"
-                  onClick={() => {
-                    realWindows.forEach((item) => {
-                      addPricingQueueItem({
-                        id: item.id || crypto.randomUUID(),
-                        sourceName: item.name,
-                        width: item.width,
-                        height: item.height,
-                        quantity: 1,
-                      });
-                    });
-                    navigate('/pricing');
-                  }}
-                >
-                  全部真窗加入报价准备区
-                </Button>
-                <Button
-                  leftSection={<IconDeviceFloppy size={16} />}
-                  onClick={() => {
-                    setDrawingTitle(fileName.replace('.dxf', ''));
-                    setSaveOpened(true);
-                  }}
-                >
-                  保存识别结果
-                </Button>
-              </Stack>
-            ) : null}
+                        <Tabs.Panel value="diagnostic" pt="xs">
+                          <Paper withBorder radius={10} p="xs" bg="#fff">
+                            <Stack gap="xs">
+                              <Group justify="space-between" align="center">
+                                <Text fw={600} size="xs">诊断结果</Text>
+                                <Badge variant="light" color={recognitionSummary.matchedLabels > 0 ? 'teal' : 'yellow'}>
+                                  {recognitionSummary.matchedLabels > 0 ? '有结果' : '需检查'}
+                                </Badge>
+                              </Group>
+                              <Text size="xs">{recognitionSummary.diagnostic.reason}</Text>
+                              <Text size="xs" c="dimmed">
+                                原始文字 {recognitionSummary.diagnostic.rawTextCount} 条 / 图层筛后编号 {recognitionSummary.diagnostic.filteredLabelCount} 条 / 规则命中 {recognitionSummary.diagnostic.regexMatchedTextCount} 条
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                图层筛后几何 {recognitionSummary.diagnostic.filteredEntityCount} 项 / 窗框候选 {recognitionSummary.diagnostic.loopCandidateCount} 个 / 最终识别 {recognitionSummary.matchedLabels} 个
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                最小边长 {identRules.minSideLength} / 最小窗面积 {identRules.minWindowArea} / 最大匹配距离 {identRules.labelMaxDistance}
+                              </Text>
+                              <Box>
+                                <Text size="xs" fw={600} mb={4}>原图对比</Text>
+                                <ScrollArea h={180} type="auto">
+                                  <Stack gap={4}>
+                                    {recognitionSummary.labelCodeStats.length > 0 ? recognitionSummary.labelCodeStats.map((item) => (
+                                      <Paper key={item.code} withBorder p={6} radius="sm" bg={item.rawCount > item.matchedCount ? '#fff8e8' : '#eefbf3'}>
+                                        <Group justify="space-between" align="center" wrap="nowrap">
+                                          <Text size="xs" ff="monospace" fw={700}>{item.code}</Text>
+                                          <Text size="xs" c={item.rawCount > item.matchedCount ? 'orange.8' : 'teal.8'}>
+                                            原图 {item.rawCount} / 识别 {item.matchedCount}
+                                          </Text>
+                                        </Group>
+                                      </Paper>
+                                    )) : (
+                                      <Text size="xs" c="dimmed">无</Text>
+                                    )}
+                                  </Stack>
+                                </ScrollArea>
+                              </Box>
+                              <Box style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+                                <Box>
+                                  <Text size="xs" fw={600} mb={4}>原始文字样本</Text>
+                                  <ScrollArea h={140} type="auto">
+                                    <Stack gap={4}>
+                                      {recognitionSummary.rawLabelSamples.length > 0 ? recognitionSummary.rawLabelSamples.map((code) => (
+                                        <Paper key={code} withBorder p={6} radius="sm" bg="#fff">
+                                          <Text size="xs" ff="monospace">{code}</Text>
+                                        </Paper>
+                                      )) : (
+                                        <Text size="xs" c="dimmed">无</Text>
+                                      )}
+                                    </Stack>
+                                  </ScrollArea>
+                                </Box>
+                                <Box>
+                                  <Text size="xs" fw={600} mb={4}>候选编号</Text>
+                                  <ScrollArea h={140} type="auto">
+                                    <Stack gap={4}>
+                                      {recognitionSummary.candidateLabelCodes.length > 0 ? recognitionSummary.candidateLabelCodes.map((code) => (
+                                        <Paper key={code} withBorder p={6} radius="sm" bg="#fff">
+                                          <Text size="xs" ff="monospace">{code}</Text>
+                                        </Paper>
+                                      )) : (
+                                        <Text size="xs" c="dimmed">无</Text>
+                                      )}
+                                    </Stack>
+                                  </ScrollArea>
+                                </Box>
+                                <Box>
+                                  <Text size="xs" fw={600} mb={4}>已识别编号</Text>
+                                  <ScrollArea h={140} type="auto">
+                                    <Stack gap={4}>
+                                      {recognitionSummary.matchedLabelCodes.length > 0 ? recognitionSummary.matchedLabelCodes.map((code) => (
+                                        <Paper key={code} withBorder p={6} radius="sm" bg="#eefbf3">
+                                          <Text size="xs" ff="monospace" c="teal.8">{code}</Text>
+                                        </Paper>
+                                      )) : (
+                                        <Text size="xs" c="dimmed">无</Text>
+                                      )}
+                                    </Stack>
+                                  </ScrollArea>
+                                </Box>
+                              </Box>
+                            </Stack>
+                          </Paper>
+                        </Tabs.Panel>
+
+                        <Tabs.Panel value="layers" pt="xs" style={{ flex: 1, minHeight: 0 }}>
+                          <Stack gap="xs" style={{ height: '100%', minHeight: 0 }}>
+                            <Text size="xs" c="dimmed">当前实际参与窗框识别的几何图层</Text>
+                            {recognitionSummary.activeEntityLayers.length > 0 ? (
+                              <ScrollArea style={{ flex: 1, minHeight: 0 }} type="auto">
+                                <Stack gap={6}>
+                                  {recognitionSummary.activeEntityLayers.map((layer) => (
+                                    <Badge key={layer} variant="light" color="blue" radius="sm" size="lg" style={{ justifyContent: 'flex-start' }}>
+                                      {layer}
+                                    </Badge>
+                                  ))}
+                                </Stack>
+                              </ScrollArea>
+                            ) : (
+                              <Text size="xs" c="dimmed">无</Text>
+                            )}
+                          </Stack>
+                        </Tabs.Panel>
+
+                        <Tabs.Panel value="excluded" pt="xs" style={{ flex: 1, minHeight: 0 }}>
+                          <Stack gap="xs" style={{ height: '100%', minHeight: 0 }}>
+                            <Text size="xs" c="dimmed">临时启用后会重新试识别</Text>
+                            {recognitionSummary.excludedLayerDetails.length > 0 ? (
+                              <ScrollArea style={{ flex: 1, minHeight: 0 }} type="auto">
+                                <Stack gap={6}>
+                                  {recognitionSummary.excludedLayerDetails.map((item) => {
+                                    const isEnabled = enabledExcludedLayers.includes(item.layer);
+                                    return (
+                                      <Button
+                                        key={item.layer}
+                                        fullWidth
+                                        justify="space-between"
+                                        size="sm"
+                                        variant={isEnabled ? 'filled' : 'light'}
+                                        color={isEnabled ? 'blue' : 'gray'}
+                                        onClick={() => toggleExcludedLayer(item.layer)}
+                                        loading={processingExcludedLayer === item.layer}
+                                        disabled={processingExcludedLayer !== null && processingExcludedLayer !== item.layer}
+                                        style={{ minHeight: 42, height: 'auto' }}
+                                      >
+                                        {item.layer} {isEnabled ? '已启用' : '已排除'} ({item.entityCount}{item.labelCount > 0 ? ` / 标注${item.labelCount}` : ''})
+                                      </Button>
+                                    );
+                                  })}
+                                </Stack>
+                              </ScrollArea>
+                            ) : (
+                              <Text size="xs" c="dimmed">无</Text>
+                            )}
+                          </Stack>
+                        </Tabs.Panel>
+
+                        <Tabs.Panel value="unmatched" pt="xs" style={{ flex: 1, minHeight: 0 }}>
+                          <Stack gap="xs" style={{ height: '100%', minHeight: 0 }}>
+                            <Text size="xs" c="dimmed">点击后直接定位问题标注</Text>
+                            {recognitionSummary.unmatchedLabelMarkers.length > 0 ? (
+                              <ScrollArea style={{ flex: 1, minHeight: 0 }} type="auto">
+                                <Stack gap={6}>
+                                  {recognitionSummary.unmatchedLabelMarkers.map((marker, index) => {
+                                    const isFocused = focusedMarker?.text === marker.text
+                                      && focusedMarker?.x === marker.x
+                                      && focusedMarker?.y === marker.y;
+                                    return (
+                                      <Button
+                                        key={`${marker.text}-${marker.x}-${marker.y}-${index}`}
+                                        fullWidth
+                                        justify="space-between"
+                                        size="sm"
+                                        variant={isFocused ? 'filled' : 'light'}
+                                        color={isFocused ? 'red' : 'yellow'}
+                                        onClick={() => focusUnmatchedMarker(marker)}
+                                        style={{ minHeight: 42, height: 'auto' }}
+                                      >
+                                        {marker.text}
+                                      </Button>
+                                    );
+                                  })}
+                                </Stack>
+                              </ScrollArea>
+                            ) : (
+                              <Text size="xs" c="dimmed">无</Text>
+                            )}
+                          </Stack>
+                        </Tabs.Panel>
+                      </Tabs>
+                    </Stack>
+                  </Paper>
+                ) : recognitionSummary ? (
+                  <Paper withBorder radius={12} p="sm" bg="#f8fafc">
+                    <Text size="xs" c="dimmed">识别报告加载中...</Text>
+                  </Paper>
+                ) : (
+                  <Text size="xs" c="dimmed">识别完成后可在这里查看诊断、被排除图层和未匹配编号。</Text>
+                )}
+              </Tabs.Panel>
+            </Tabs>
           </Stack>
         </Paper>
 

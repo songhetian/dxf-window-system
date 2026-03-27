@@ -27,6 +27,10 @@ const BATCH_SIZE = 1000;
 type Point = { x: number; y: number };
 type TextMarker = { text: string; x: number; y: number; layer: string };
 type RecognitionMarker = TextMarker;
+type MatchedLabel = { marker: TextMarker; code: string };
+type OrientationHintBox = {
+  box: { width: number; height: number; centerX: number; centerY: number };
+};
 type FlatEntity = {
   type: string;
   pts: Point[];
@@ -42,17 +46,50 @@ type LoopCandidate = {
   box: { width: number; height: number; centerX: number; centerY: number };
   raw: any;
   fingerprint: string;
+  sourceKind: 'closed' | 'segment' | 'component';
+};
+type ComponentCandidate = {
+  pts: Point[];
+  box: { width: number; height: number; centerX: number; centerY: number };
+  axisCoverageX: number;
+  axisCoverageY: number;
+  density: number;
+  fingerprint: string;
+};
+type LoopScoreMeta = {
+  nestedChildren: number;
+  sourcePenalty: number;
+  oversizePenalty: number;
+  minDimension: number;
+  baseDistanceLimit: number;
 };
 type ExcludedLayerDetail = {
   layer: string;
   entityCount: number;
   labelCount: number;
 };
+type LabelCodeStat = {
+  code: string;
+  rawCount: number;
+  matchedCount: number;
+};
 type RecognitionSummary = {
   totalLabels: number;
   matchedLabels: number;
+  candidateLabelCodes: string[];
+  matchedLabelCodes: string[];
+  rawLabelSamples: string[];
+  labelCodeStats: LabelCodeStat[];
   unmatchedLabels: string[];
   unmatchedLabelMarkers: RecognitionMarker[];
+  diagnostic: {
+    rawTextCount: number;
+    regexMatchedTextCount: number;
+    filteredLabelCount: number;
+    filteredEntityCount: number;
+    loopCandidateCount: number;
+    reason: string;
+  };
   includedLayers: string[];
   excludedLayers: string[];
   excludedLayerDetails: ExcludedLayerDetail[];
@@ -76,11 +113,113 @@ const rotate = (x: number, y: number, angle: number) => {
 const makePointKey = (point: Point) => `${Math.round(point.x / SNAP_PRECISION)},${Math.round(point.y / SNAP_PRECISION)}`;
 
 const normalizeText = (text: string) => text.replace(/\\P/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+const compactLabelText = (text: string) => normalizeText(text).replace(/[\s_\-－–—'’‘`′＇"“”″]+/g, '');
+const stripDxfTextFormatting = (text: string) => text
+  .replace(/\\P/gi, ' ')
+  .replace(/\\[AaCcFfHhLlOoPpQqTtWw][^;]*;/g, '')
+  .replace(/[{}]/g, ' ')
+  .replace(/\^I/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+const extractEntityText = (entity: any) => {
+  const rawValue = entity.text
+    ?? entity.string
+    ?? entity.plainText
+    ?? entity.rawText
+    ?? entity.value
+    ?? '';
+  if (typeof rawValue !== 'string') return '';
+  return normalizeText(stripDxfTextFormatting(rawValue));
+};
+const escapeRegExp = (value: string) => value
+  .replaceAll('\\', '\\\\')
+  .replaceAll('.', '\\.')
+  .replaceAll('*', '\\*')
+  .replaceAll('+', '\\+')
+  .replaceAll('?', '\\?')
+  .replaceAll('^', '\\^')
+  .replaceAll('$', '\\$')
+  .replaceAll('{', '\\{')
+  .replaceAll('}', '\\}')
+  .replaceAll('(', '\\(')
+  .replaceAll(')', '\\)')
+  .replaceAll('|', '\\|')
+  .replaceAll('[', '\\[')
+  .replaceAll(']', '\\]');
+const parsePrefixes = (value: string) => value
+  .split(/[，,\s]+/)
+  .map((item) => compactLabelText(item))
+  .filter(Boolean)
+  .sort((a, b) => b.length - a.length);
+const splitCandidateTokens = (text: string) => normalizeText(text)
+  .split(/[\s,，;；:：、()（）[\]【】<>《》/\\|]+/)
+  .map((item) => item.trim())
+  .filter(Boolean);
+
+const expandPrefixes = (prefixes: string[]) => [...prefixes].sort((a, b) => b.length - a.length);
+
+const buildLabelPatternRegex = (pattern: string) => new RegExp(pattern || '^C\\d{4}$', 'i');
+const buildPrefixOnlyRegex = (prefix: string) => new RegExp(
+  `^${escapeRegExp(prefix)}\\d{2,}[A-Z\\u4E00-\\u9FFF\\u0027\\u2019\\u2018\\u2032\\uFF07\\u0022\\u201C\\u201D\\u2033]{0,4}$`,
+  'i',
+);
+
+const matchStandaloneLabelCode = (candidate: string, regex: RegExp, prefixes: string[]) => {
+  if (!candidate) return null;
+
+  const normalized = normalizeText(candidate);
+  const compact = compactLabelText(candidate);
+  const normalizedCandidates = [normalized, compact]
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  for (const item of normalizedCandidates) {
+    const match = item.match(regex);
+    if (match?.[0] && compactLabelText(match[0]) === compactLabelText(item)) {
+      return compactLabelText(match[0]).toUpperCase();
+    }
+  }
+
+  for (const prefix of prefixes) {
+    const prefixRegex = buildPrefixOnlyRegex(prefix);
+    if (prefixRegex.test(compact)) {
+      return compact.toUpperCase();
+    }
+  }
+
+  return null;
+};
+
+const findLabelCode = (text: string, pattern: string, prefixes: string[]) => {
+  const regex = buildLabelPatternRegex(pattern);
+  const normalized = normalizeText(text);
+  const compact = compactLabelText(text);
+  const tokens = splitCandidateTokens(text);
+  const candidates = [
+    normalized,
+    compact,
+    ...tokens,
+    ...tokens.map((item) => compactLabelText(item)),
+  ];
+
+  for (const candidate of candidates) {
+    const matched = matchStandaloneLabelCode(candidate, regex, prefixes);
+    if (matched) return matched;
+  }
+
+  return null;
+};
 
 const pointToBoxDistance = (point: Point, box: LoopCandidate['box']) => {
   const dx = Math.max(Math.abs(point.x - box.centerX) - box.width / 2, 0);
   const dy = Math.max(Math.abs(point.y - box.centerY) - box.height / 2, 0);
   return Math.hypot(dx, dy);
+};
+const isLoopContainingLoop = (outer: LoopCandidate, inner: LoopCandidate) => {
+  if (outer.fingerprint === inner.fingerprint) return false;
+  if (outer.area <= inner.area) return false;
+  const centerPoint = { x: inner.box.centerX, y: inner.box.centerY };
+  return isPointInPolygon(centerPoint, outer.pts);
 };
 
 const makeLoopFingerprint = (points: Point[], area: number) => {
@@ -111,6 +250,11 @@ const matchesLayerKeyword = (layer: string, keywords: string[]) => {
 };
 
 const uniqueSorted = (items: string[]) => [...new Set(items.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+const loopSourcePriority: Record<LoopCandidate['sourceKind'], number> = {
+  closed: 0,
+  segment: 1,
+  component: 2,
+};
 
 const collectLoopsFromSegments = (entities: FlatEntity[]) => {
   const edges = new Map<number, { a: string; b: string }>();
@@ -214,6 +358,129 @@ const collectLoopsFromSegments = (entities: FlatEntity[]) => {
   return loops;
 };
 
+const collectComponentCandidates = (entities: FlatEntity[]) => {
+  const edges = new Map<number, { a: string; b: string; from: Point; to: Point }>();
+  const nodes = new Map<string, Point>();
+  const adjacency = new Map<string, number[]>();
+
+  const addEdge = (from: Point, to: Point, edgeId: number) => {
+    const fromKey = makePointKey(from);
+    const toKey = makePointKey(to);
+    if (fromKey === toKey) return false;
+
+    edges.set(edgeId, { a: fromKey, b: toKey, from, to });
+    if (!nodes.has(fromKey)) nodes.set(fromKey, from);
+    if (!nodes.has(toKey)) nodes.set(toKey, to);
+    adjacency.set(fromKey, [...(adjacency.get(fromKey) || []), edgeId]);
+    adjacency.set(toKey, [...(adjacency.get(toKey) || []), edgeId]);
+    return true;
+  };
+
+  let edgeId = 0;
+  entities.forEach((entity) => {
+    if (entity.pts.length < 2) return;
+    for (let i = 1; i < entity.pts.length; i += 1) {
+      addEdge(entity.pts[i - 1], entity.pts[i], edgeId);
+      edgeId += 1;
+    }
+    if (entity.isClosed) {
+      addEdge(entity.pts[entity.pts.length - 1], entity.pts[0], edgeId);
+      edgeId += 1;
+    }
+  });
+
+  const visitedNodes = new Set<string>();
+  const components: ComponentCandidate[] = [];
+
+  for (const nodeKey of nodes.keys()) {
+    if (visitedNodes.has(nodeKey)) continue;
+
+    const stack = [nodeKey];
+    const componentNodes = new Set<string>();
+    const componentEdges = new Set<number>();
+
+    while (stack.length > 0) {
+      const key = stack.pop()!;
+      if (componentNodes.has(key)) continue;
+      componentNodes.add(key);
+      visitedNodes.add(key);
+
+      const connectedEdges = adjacency.get(key) || [];
+      connectedEdges.forEach((id) => {
+        componentEdges.add(id);
+        const edge = edges.get(id);
+        if (!edge) return;
+        const otherKey = edge.a === key ? edge.b : edge.a;
+        if (!componentNodes.has(otherKey)) stack.push(otherKey);
+      });
+    }
+
+    if (componentNodes.size < 4 || componentEdges.size < 4) continue;
+
+    const points = [...componentNodes].map((key) => nodes.get(key)!);
+    const box = calculateBoundingBox(points);
+    if (!Number.isFinite(box.width) || !Number.isFinite(box.height) || box.width <= 0 || box.height <= 0) continue;
+
+    const tolerance = Math.max(SNAP_PRECISION * 2, Math.min(box.width, box.height) * 0.04);
+    let coverLeft = 0;
+    let coverRight = 0;
+    let coverTop = 0;
+    let coverBottom = 0;
+
+    componentEdges.forEach((id) => {
+      const edge = edges.get(id);
+      if (!edge) return;
+      const dx = Math.abs(edge.to.x - edge.from.x);
+      const dy = Math.abs(edge.to.y - edge.from.y);
+
+      if (dy <= tolerance) {
+        const len = dx;
+        if (Math.abs(edge.from.y - (box.centerY - box.height / 2)) <= tolerance
+          && Math.abs(edge.to.y - (box.centerY - box.height / 2)) <= tolerance) {
+          coverBottom += len;
+        }
+        if (Math.abs(edge.from.y - (box.centerY + box.height / 2)) <= tolerance
+          && Math.abs(edge.to.y - (box.centerY + box.height / 2)) <= tolerance) {
+          coverTop += len;
+        }
+      }
+
+      if (dx <= tolerance) {
+        const len = dy;
+        if (Math.abs(edge.from.x - (box.centerX - box.width / 2)) <= tolerance
+          && Math.abs(edge.to.x - (box.centerX - box.width / 2)) <= tolerance) {
+          coverLeft += len;
+        }
+        if (Math.abs(edge.from.x - (box.centerX + box.width / 2)) <= tolerance
+          && Math.abs(edge.to.x - (box.centerX + box.width / 2)) <= tolerance) {
+          coverRight += len;
+        }
+      }
+    });
+
+    const axisCoverageX = Math.max(coverTop, coverBottom) / Math.max(box.width, 1);
+    const axisCoverageY = Math.max(coverLeft, coverRight) / Math.max(box.height, 1);
+    const density = componentEdges.size / Math.max(points.length, 1);
+    const rectPts = [
+      { x: box.centerX - box.width / 2, y: box.centerY - box.height / 2 },
+      { x: box.centerX + box.width / 2, y: box.centerY - box.height / 2 },
+      { x: box.centerX + box.width / 2, y: box.centerY + box.height / 2 },
+      { x: box.centerX - box.width / 2, y: box.centerY + box.height / 2 },
+    ];
+
+    components.push({
+      pts: rectPts,
+      box,
+      axisCoverageX,
+      axisCoverageY,
+      density,
+      fingerprint: makeLoopFingerprint(rectPts, box.width * box.height),
+    });
+  }
+
+  return components;
+};
+
 const buildLoopCandidates = (
   entities: FlatEntity[],
   wallAreaThreshold: number,
@@ -223,7 +490,7 @@ const buildLoopCandidates = (
   const loopMap = new Map<string, LoopCandidate>();
   const walls: LoopCandidate[] = [];
 
-  const pushLoop = (points: Point[], raw: any) => {
+  const pushLoop = (points: Point[], raw: any, sourceKind: LoopCandidate['sourceKind']) => {
     if (points.length < 3) return;
     const area = calculateArea(points);
     if (area < MIN_LOOP_AREA) return;
@@ -234,7 +501,7 @@ const buildLoopCandidates = (
 
     if (target) {
       if (!walls.some((item) => item.fingerprint === fingerprint)) {
-        walls.push({ pts: points, area, box, raw, fingerprint });
+        walls.push({ pts: points, area, box, raw, fingerprint, sourceKind });
       }
       return;
     }
@@ -242,19 +509,32 @@ const buildLoopCandidates = (
     if (area < minWindowArea) return;
     if (box.width < minSideLength || box.height < minSideLength) return;
 
-    if (!loopMap.has(fingerprint)) {
-      loopMap.set(fingerprint, { pts: points, area, box, raw, fingerprint });
+    const nextLoop = { pts: points, area, box, raw, fingerprint, sourceKind };
+    const currentLoop = loopMap.get(fingerprint);
+    if (!currentLoop || loopSourcePriority[sourceKind] < loopSourcePriority[currentLoop.sourceKind]) {
+      loopMap.set(fingerprint, nextLoop);
     }
   };
 
   entities.forEach((entity) => {
     if (entity.isClosed && entity.pts.length >= 3) {
-      pushLoop(entity.pts, entity.raw);
+      pushLoop(entity.pts, entity.raw, 'closed');
     }
   });
 
   collectLoopsFromSegments(entities).forEach((points) => {
-    pushLoop(points, { type: 'SEGMENT_LOOP' });
+    pushLoop(points, { type: 'SEGMENT_LOOP' }, 'segment');
+  });
+
+  collectComponentCandidates(entities).forEach((component) => {
+    if (component.axisCoverageX < 0.72 || component.axisCoverageY < 0.72) return;
+    if (component.density < 1) return;
+    pushLoop(component.pts, {
+      type: 'COMPONENT_BOX',
+      axisCoverageX: component.axisCoverageX,
+      axisCoverageY: component.axisCoverageY,
+      density: component.density,
+    }, 'component');
   });
 
   return {
@@ -263,31 +543,182 @@ const buildLoopCandidates = (
   };
 };
 
-const findBestLoopForLabel = (
+const scoreLoopForLabel = (
   label: TextMarker,
+  loop: LoopCandidate,
+  loopMeta: LoopScoreMeta,
+  labelMaxDistance: number,
+  options?: { relaxDistance?: boolean },
+) => {
+  const contains = isPointInPolygon(label, loop.pts);
+  const boxDistance = pointToBoxDistance(label, loop.box);
+  const centerDistance = Math.hypot(label.x - loop.box.centerX, label.y - loop.box.centerY);
+  const distanceLimit = options?.relaxDistance ? Math.max(loopMeta.baseDistanceLimit * 4, 5000) : loopMeta.baseDistanceLimit;
+  const normalizedCenterDistance = centerDistance / Math.max(loopMeta.minDimension, 1);
+  const outsidePenalty = contains ? 0 : 8000;
+  const nestedPenalty = loopMeta.nestedChildren > 0
+    ? Math.min(loopMeta.nestedChildren * (loop.sourceKind === 'component' ? 2200 : 950), 12000)
+    : 0;
+
+  if (!contains && boxDistance > distanceLimit) return null;
+
+  return {
+    loop,
+    score: loopMeta.sourcePenalty
+      + outsidePenalty
+      + boxDistance * 14
+      + centerDistance
+      + normalizedCenterDistance * 180
+      + loop.area * 0.00006
+      + nestedPenalty
+      + loopMeta.oversizePenalty,
+  };
+};
+
+const buildLoopScoreMeta = (
   loops: LoopCandidate[],
-  usedFingerprints: Set<string>,
   labelMaxDistance: number,
 ) => {
-  const candidates = loops
-    .filter((loop) => !usedFingerprints.has(loop.fingerprint))
-    .map((loop) => {
-      const contains = isPointInPolygon(label, loop.pts);
-      const boxDistance = pointToBoxDistance(label, loop.box);
-      const centerDistance = Math.hypot(label.x - loop.box.centerX, label.y - loop.box.centerY);
-      const distanceLimit = Math.max(labelMaxDistance, Math.max(loop.box.width, loop.box.height) * 0.35);
+  const nestedChildrenMap = new Map<string, number>();
+  loops.forEach((loop) => nestedChildrenMap.set(loop.fingerprint, 0));
 
-      if (!contains && boxDistance > distanceLimit) return null;
+  for (let i = 0; i < loops.length; i += 1) {
+    for (let j = 0; j < loops.length; j += 1) {
+      if (i === j) continue;
+      if (isLoopContainingLoop(loops[i], loops[j])) {
+        nestedChildrenMap.set(loops[i].fingerprint, (nestedChildrenMap.get(loops[i].fingerprint) || 0) + 1);
+      }
+    }
+  }
 
-      return {
-        loop,
-        score: (contains ? 0 : 100_000) + boxDistance * 10 + centerDistance + loop.area * 0.0001,
-      };
-    })
-    .filter(Boolean) as Array<{ loop: LoopCandidate; score: number }>;
+  return new Map<string, LoopScoreMeta>(
+    loops.map((loop) => [
+      loop.fingerprint,
+      {
+        nestedChildren: nestedChildrenMap.get(loop.fingerprint) || 0,
+        sourcePenalty: loop.sourceKind === 'closed' ? 0 : loop.sourceKind === 'segment' ? 1200 : 4800,
+        oversizePenalty: loop.sourceKind === 'component' && loop.area > 8_000_000
+          ? Math.min((loop.area - 8_000_000) / 1500, 6000)
+          : 0,
+        minDimension: Math.max(Math.min(loop.box.width, loop.box.height), 1),
+        baseDistanceLimit: Math.max(labelMaxDistance, Math.max(loop.box.width, loop.box.height) * 0.35),
+      },
+    ]),
+  );
+};
 
-  candidates.sort((a, b) => a.score - b.score);
-  return candidates[0]?.loop || null;
+const matchLabelsToLoops = (
+  labels: MatchedLabel[],
+  loops: LoopCandidate[],
+  labelMaxDistance: number,
+  options?: { relaxDistance?: boolean; preferStrongLoops?: boolean },
+) => {
+  if (labels.length === 0 || loops.length === 0) {
+    return {
+      matches: [] as Array<{ label: MatchedLabel; loop: LoopCandidate; score: number }>,
+      unmatchedLabels: labels,
+      remainingLoops: loops,
+    };
+  }
+
+  const loopScoreMeta = buildLoopScoreMeta(loops, labelMaxDistance);
+  const strongLoops = loops.filter((loop) => loop.sourceKind !== 'component');
+  const scoredPairs: Array<{ labelIndex: number; loopFingerprint: string; loop: LoopCandidate; score: number }> = [];
+
+  labels.forEach((label, labelIndex) => {
+    const buildCandidates = (candidateLoops: LoopCandidate[]) => {
+      const nearbyLoops = candidateLoops
+        .map((loop) => ({
+          loop,
+          boxDistance: pointToBoxDistance(label.marker, loop.box),
+          meta: loopScoreMeta.get(loop.fingerprint)!,
+        }))
+        .filter(({ boxDistance, meta }) => boxDistance <= (options?.relaxDistance ? Math.max(meta.baseDistanceLimit * 4, 5000) : meta.baseDistanceLimit))
+        .sort((a, b) => a.boxDistance - b.boxDistance)
+        .slice(0, 18);
+
+      const scopedLoops = nearbyLoops.length > 0
+        ? nearbyLoops
+        : candidateLoops
+          .map((loop) => ({
+            loop,
+            boxDistance: pointToBoxDistance(label.marker, loop.box),
+            meta: loopScoreMeta.get(loop.fingerprint)!,
+          }))
+          .sort((a, b) => a.boxDistance - b.boxDistance)
+          .slice(0, 8);
+
+      return scopedLoops
+        .map(({ loop, meta }) => scoreLoopForLabel(label.marker, loop, meta, labelMaxDistance, options))
+        .filter(Boolean) as Array<{ loop: LoopCandidate; score: number }>;
+    };
+
+    const strongCandidates = buildCandidates(strongLoops);
+    const candidateBase = options?.preferStrongLoops && strongCandidates.length > 0
+      ? strongCandidates
+      : buildCandidates(loops);
+
+    candidateBase.forEach((candidate) => {
+      scoredPairs.push({
+        labelIndex,
+        loopFingerprint: candidate.loop.fingerprint,
+        loop: candidate.loop,
+        score: candidate.score,
+      });
+    });
+  });
+
+  scoredPairs.sort((a, b) => a.score - b.score);
+
+  const usedLabelIndexes = new Set<number>();
+  const usedLoopFingerprints = new Set<string>();
+  const matches: Array<{ label: MatchedLabel; loop: LoopCandidate; score: number }> = [];
+
+  scoredPairs.forEach((pair) => {
+    if (usedLabelIndexes.has(pair.labelIndex) || usedLoopFingerprints.has(pair.loopFingerprint)) return;
+    usedLabelIndexes.add(pair.labelIndex);
+    usedLoopFingerprints.add(pair.loopFingerprint);
+    matches.push({
+      label: labels[pair.labelIndex],
+      loop: pair.loop,
+      score: pair.score,
+    });
+  });
+
+  return {
+    matches,
+    unmatchedLabels: labels.filter((_label, index) => !usedLabelIndexes.has(index)),
+    remainingLoops: loops.filter((loop) => !usedLoopFingerprints.has(loop.fingerprint)),
+  };
+};
+
+const resolveOpeningType = (
+  box: LoopCandidate['box'],
+  area: number,
+  orientationHintBoxes: OrientationHintBox[],
+) => {
+  let openingCount = 0;
+  let singleHintCenterX: number | null = null;
+
+  orientationHintBoxes.forEach(({ box: hintBox }) => {
+    if (
+      hintBox.centerX > box.centerX - box.width / 2
+      && hintBox.centerX < box.centerX + box.width / 2
+      && hintBox.centerY > box.centerY - box.height / 2
+      && hintBox.centerY < box.centerY + box.height / 2
+    ) {
+      openingCount += 1;
+      if (singleHintCenterX === null) singleHintCenterX = hintBox.centerX;
+    }
+  });
+
+  if (openingCount >= 2) return '双开窗';
+  if (openingCount === 1 && singleHintCenterX !== null) {
+    const openingSide = singleHintCenterX < box.centerX ? '左开' : '右开';
+    return `单开窗(${openingSide})`;
+  }
+  if (area < 1_000_000) return '固定窗';
+  return '推拉窗';
 };
 
 export const useDxfProcessor = () => {
@@ -436,10 +867,10 @@ export const useDxfProcessor = () => {
             entity.vertices.forEach((vertex: any) => {
               pts.push(transformPoint(vertex.x, vertex.y, offset, scale, rotation));
             });
-          } else if ((entity.type === 'TEXT' || entity.type === 'MTEXT') && (entity.position || entity.startPoint)) {
+          } else if ((entity.type === 'TEXT' || entity.type === 'MTEXT' || entity.type === 'ATTRIB' || entity.type === 'ATTDEF') && (entity.position || entity.startPoint)) {
             const position = entity.position || entity.startPoint;
             const transformed = transformPoint(position.x, position.y, offset, scale, rotation);
-            const text = normalizeText(entity.text || '');
+            const text = extractEntityText(entity);
             if (text) {
               textMarkers.push({ text, x: transformed.x, y: transformed.y, layer: entityLayer });
             }
@@ -546,45 +977,81 @@ export const useDxfProcessor = () => {
       const minWindowArea = identRules.minWindowArea * 1_000_000;
       const minSideLength = identRules.minSideLength;
       const labelMaxDistance = identRules.labelMaxDistance;
+      const orientationHintBoxes: OrientationHintBox[] = orientationHints.map((hint) => ({
+        box: calculateBoundingBox(hint.pts),
+      }));
       const recognitionEntities = transformedEntities.filter((entity) => !shouldExcludeLayer(entity.layer, excludeLayerKeywords));
       const preferredRecognitionEntities = includeLayerKeywords.length > 0
         ? recognitionEntities.filter((entity) => matchesLayerKeyword(entity.layer, includeLayerKeywords))
         : recognitionEntities;
-      const effectiveEntities = preferredRecognitionEntities.length > 0 ? preferredRecognitionEntities : recognitionEntities;
-      const { walls, loops } = buildLoopCandidates(
+
+      let effectiveEntities = preferredRecognitionEntities.length > 0 ? preferredRecognitionEntities : recognitionEntities;
+      let { walls, loops } = buildLoopCandidates(
         effectiveEntities,
         wallAreaThreshold,
         minWindowArea,
         minSideLength,
       );
-      const regex = new RegExp(identRules.windowPattern || 'C\\d{4}', 'i');
-      const filteredLabels = textMarkers.filter((marker) => !shouldExcludeLayer(marker.layer, excludeLayerKeywords));
-      const preferredLabels = includeLayerKeywords.length > 0
-        ? filteredLabels.filter((marker) => matchesLayerKeyword(marker.layer, includeLayerKeywords))
-        : filteredLabels;
-      const effectiveLabels = preferredLabels.length > 0 ? preferredLabels : filteredLabels;
-      const targetLabels = effectiveLabels.filter((marker) => regex.test(marker.text));
-      const usedFingerprints = new Set<string>();
+
+      const fellBackToAllGeometry = (
+        preferredRecognitionEntities.length > 0
+        && preferredRecognitionEntities.length < recognitionEntities.length
+        && loops.length === 0
+      );
+
+      if (fellBackToAllGeometry) {
+        effectiveEntities = recognitionEntities;
+        ({ walls, loops } = buildLoopCandidates(
+          effectiveEntities,
+          wallAreaThreshold,
+          minWindowArea,
+          minSideLength,
+        ));
+      }
+      const labelPrefixes = expandPrefixes(parsePrefixes(identRules.windowPrefix || 'C'));
+      // 编号文字通常就在 text/dim/标注 图层里，不能跟几何一起按排除图层直接过滤掉。
+      const filteredLabels = textMarkers;
+      const preferredLabels = filteredLabels;
+      const effectiveLabels = preferredLabels;
+      const matchedLabels = effectiveLabels
+        .map((marker) => ({
+          marker,
+          code: findLabelCode(marker.text, identRules.windowPattern || 'C\\d{4}', labelPrefixes),
+        }))
+        .filter((item) => item.code);
+      const rawLabelSamples = uniqueSorted(
+        effectiveLabels
+          .map((marker) => compactLabelText(marker.text))
+          .filter((text) => labelPrefixes.some((prefix) => text.includes(prefix)))
+      ).slice(0, 200);
       const windowsToCreate: WindowItem[] = [];
-      const unmatchedLabels: string[] = [];
-      const unmatchedLabelMarkers: RecognitionMarker[] = [];
+      const rawCountMap = new Map<string, number>();
+      matchedLabels.forEach(({ code }) => {
+        if (!code) return;
+        rawCountMap.set(code, (rawCountMap.get(code) || 0) + 1);
+      });
 
-      targetLabels.forEach((label) => {
-        const matchedLoop = findBestLoopForLabel(label, loops, usedFingerprints, labelMaxDistance);
-        if (!matchedLoop) {
-          unmatchedLabels.push(label.text);
-          unmatchedLabelMarkers.push({
-            ...label,
-            x: label.x - centerX,
-            y: label.y - centerY,
-          });
-          return;
-        }
+      const primaryMatching = matchLabelsToLoops(
+        matchedLabels as MatchedLabel[],
+        loops,
+        labelMaxDistance,
+        { preferStrongLoops: true },
+      );
+      const relaxedMatching = matchLabelsToLoops(
+        primaryMatching.unmatchedLabels,
+        primaryMatching.remainingLoops,
+        labelMaxDistance,
+        { relaxDistance: true, preferStrongLoops: true },
+      );
+      const finalMatches = [...primaryMatching.matches, ...relaxedMatching.matches];
+      let unmatchedLabelItems = relaxedMatching.unmatchedLabels;
+      let remainingLoops = relaxedMatching.remainingLoops;
 
-        usedFingerprints.add(matchedLoop.fingerprint);
-
+      const hasWalls = walls.length > 0;
+      finalMatches.forEach(({ label, loop: matchedLoop }) => {
         const box = matchedLoop.box;
-        const isInWall = walls.some((wall) => isPointInPolygon({ x: box.centerX, y: box.centerY }, wall.pts));
+        const isInWall = !hasWalls
+          || walls.some((wall) => isPointInPolygon({ x: box.centerX, y: box.centerY }, wall.pts));
         const perimeter = calculatePerimeter(matchedLoop.pts);
         const { arcRatio } = analyzePathFeatures(matchedLoop.pts);
         const symmetryRate = calculateSymmetryRate(matchedLoop.pts);
@@ -595,22 +1062,11 @@ export const useDxfProcessor = () => {
         else if (arcRatio > 30 && symmetryRate >= 80) baseType = '拱形';
         else if (arcRatio < 5 && edgeCount >= 5) baseType = '多边形';
 
-        const hasOpening = orientationHints.some((hint) => {
-          const hintBox = calculateBoundingBox(hint.pts);
-          return (
-            hintBox.centerX > box.centerX - box.width / 2 &&
-            hintBox.centerX < box.centerX + box.width / 2 &&
-            hintBox.centerY > box.centerY - box.height / 2 &&
-            hintBox.centerY < box.centerY + box.height / 2
-          );
-        });
-
-        let openingType = hasOpening ? '平开窗' : '推拉窗';
-        if (!hasOpening && matchedLoop.area < 1_000_000) openingType = '固定窗';
+        const openingType = resolveOpeningType(box, matchedLoop.area, orientationHintBoxes);
 
         windowsToCreate.push({
           id: crypto.randomUUID(),
-          name: label.text,
+          name: label.code || compactLabelText(label.marker.text) || label.marker.text,
           category: isInWall ? '真窗' : '参考大样',
           shapeType: `${baseType}${openingType}${isInWall ? '' : ' (大样)'}`,
           width: box.width,
@@ -626,6 +1082,79 @@ export const useDxfProcessor = () => {
         });
       });
 
+      if (unmatchedLabelItems.length > 0 && remainingLoops.length > 0 && unmatchedLabelItems.length === remainingLoops.length) {
+          const orderedLabels = [...unmatchedLabelItems].sort((a, b) => {
+            if (Math.abs(a.marker.y - b.marker.y) > labelMaxDistance) return b.marker.y - a.marker.y;
+            return a.marker.x - b.marker.x;
+          });
+          const orderedLoops = [...remainingLoops].sort((a, b) => {
+            if (Math.abs(a.box.centerY - b.box.centerY) > labelMaxDistance) return b.box.centerY - a.box.centerY;
+            return a.box.centerX - b.box.centerX;
+          });
+
+          orderedLabels.forEach((label, index) => {
+            const matchedLoop = orderedLoops[index];
+            if (!matchedLoop) return;
+
+            const box = matchedLoop.box;
+            const isInWall = !hasWalls
+              || walls.some((wall) => isPointInPolygon({ x: box.centerX, y: box.centerY }, wall.pts));
+            const perimeter = calculatePerimeter(matchedLoop.pts);
+            const { arcRatio } = analyzePathFeatures(matchedLoop.pts);
+            const symmetryRate = calculateSymmetryRate(matchedLoop.pts);
+            const edgeCount = matchedLoop.pts.length;
+
+            let baseType = '矩形';
+            if (arcRatio > 10 && symmetryRate < 70) baseType = '弧形';
+            else if (arcRatio > 30 && symmetryRate >= 80) baseType = '拱形';
+            else if (arcRatio < 5 && edgeCount >= 5) baseType = '多边形';
+
+            const openingType = resolveOpeningType(box, matchedLoop.area, orientationHintBoxes);
+
+            windowsToCreate.push({
+              id: crypto.randomUUID(),
+              name: label.code || compactLabelText(label.marker.text) || label.marker.text,
+              category: isInWall ? '真窗' : '参考大样',
+              shapeType: `${baseType}${openingType}${isInWall ? '' : ' (大样)'}`,
+              width: box.width,
+              height: box.height,
+              area: matchedLoop.area,
+              perimeter,
+              glassArea: Math.max(0, matchedLoop.area - perimeter * profileWidth),
+              frameWeight: (perimeter / 1000) * unitWeight,
+              points: matchedLoop.pts.map((point) => ({ x: point.x - centerX, y: point.y - centerY })),
+              handle: matchedLoop.raw?.handle,
+              arcRatio: Math.round(arcRatio),
+              symmetryRate: Math.round(symmetryRate),
+            });
+          });
+      }
+      const matchedWindowNames = new Set(windowsToCreate.map((item) => item.name).filter(Boolean));
+      const unmatchedLabelItemsForReport = matchedLabels.filter((item) => !item.code || !matchedWindowNames.has(item.code));
+      const unmatchedLabels = uniqueSorted(unmatchedLabelItemsForReport.map((item) => item.code || compactLabelText(item.marker.text) || item.marker.text));
+      const unmatchedLabelMarkers: RecognitionMarker[] = unmatchedLabelItemsForReport.map((item) => ({
+        ...item.marker,
+        text: item.code || item.marker.text,
+        x: item.marker.x - centerX,
+        y: item.marker.y - centerY,
+      }));
+      const matchedCountMap = new Map<string, number>();
+      windowsToCreate.forEach((item) => {
+        if (!item.name) return;
+        matchedCountMap.set(item.name, (matchedCountMap.get(item.name) || 0) + 1);
+      });
+      const labelCodeStats = [...rawCountMap.entries()]
+        .map(([code, rawCount]) => ({
+          code,
+          rawCount,
+          matchedCount: matchedCountMap.get(code) || 0,
+        }))
+        .sort((a, b) => {
+          const gapDiff = (b.rawCount - b.matchedCount) - (a.rawCount - a.matchedCount);
+          if (gapDiff !== 0) return gapDiff;
+          return a.code.localeCompare(b.code, 'zh-CN');
+        });
+
       const excludedLayerMap = new Map<string, ExcludedLayerDetail>();
       transformedEntities.forEach((entity) => {
         if (!shouldExcludeLayer(entity.layer, excludeLayerKeywords)) return;
@@ -639,6 +1168,23 @@ export const useDxfProcessor = () => {
         current.labelCount += 1;
         excludedLayerMap.set(marker.layer, current);
       });
+
+      let diagnosticReason = '已识别到可匹配对象。';
+      if (matchedLabels.length === 0) {
+        diagnosticReason = effectiveLabels.length === 0
+          ? '图纸里没有可识别文字，优先检查文本是否被正确解析。'
+          : '当前识别规则没有命中任何编号文字，优先检查编号格式和规则。';
+      } else if (loops.length === 0) {
+        diagnosticReason = effectiveEntities.length === 0
+          ? '图层筛选后可用几何为 0，优先检查图层过滤。'
+          : (fellBackToAllGeometry
+            ? '优先图层里没拼出窗框，已自动回退到全部几何层；仍无候选，优先检查最小边长、最小窗面积和图层。'
+            : '编号命中了，但没有可用窗框候选，优先检查最小边长、最小窗面积和图层。');
+      } else if (windowsToCreate.length === 0) {
+        diagnosticReason = '编号和窗框都存在，但没有成功匹配，优先检查最大匹配距离。';
+      } else if (unmatchedLabelMarkers.length > 0) {
+        diagnosticReason = '部分编号未匹配到窗框，可点击未匹配编号直接定位检查。';
+      }
 
       const finalChunks = [...chunkMap.entries()].map(([color, paths]) => ({ color, paths }));
       setProcessedResult({
@@ -656,10 +1202,22 @@ export const useDxfProcessor = () => {
         },
         totalEntities: transformedEntities.length,
         recognitionSummary: {
-          totalLabels: targetLabels.length,
+          totalLabels: matchedLabels.length,
           matchedLabels: windowsToCreate.length,
+          candidateLabelCodes: uniqueSorted(matchedLabels.map((item) => item.code || '').filter(Boolean)),
+          matchedLabelCodes: uniqueSorted(windowsToCreate.map((item) => item.name).filter(Boolean)),
+          rawLabelSamples,
+          labelCodeStats,
           unmatchedLabels: uniqueSorted(unmatchedLabels),
           unmatchedLabelMarkers,
+          diagnostic: {
+            rawTextCount: textMarkers.length,
+            regexMatchedTextCount: matchedLabels.length,
+            filteredLabelCount: effectiveLabels.length,
+            filteredEntityCount: effectiveEntities.length,
+            loopCandidateCount: loops.length,
+            reason: diagnosticReason,
+          },
           includedLayers: uniqueSorted(preferredRecognitionEntities.map((entity) => entity.layer)),
           excludedLayers: [...excludedLayerMap.keys()].sort((a, b) => a.localeCompare(b)),
           excludedLayerDetails: [...excludedLayerMap.values()].sort((a, b) => a.layer.localeCompare(b.layer)),
