@@ -30,6 +30,7 @@ interface DatabaseSchema {
 }
 
 export const initDb = (dbPath: string) => {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
   db.pragma('foreign_keys = ON');
   
@@ -38,6 +39,7 @@ export const initDb = (dbPath: string) => {
     const possiblePaths = [
       path.join(__dirname, 'schema.sql'),
       path.join(__dirname, '../database/schema.sql'),
+      path.join(process.resourcesPath, 'schema.sql'),
       path.join(process.cwd(), 'src/main/database/schema.sql'),
     ];
 

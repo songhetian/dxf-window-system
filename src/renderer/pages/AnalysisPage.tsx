@@ -891,7 +891,7 @@ const AnalysisPage = () => {
         <Button color="teal" size="sm" onClick={handleSave} loading={createRecord.isPending} leftSection={<IconDeviceFloppy size={16}/>}>保存到工作表</Button>
       </Group>
     }>
-      <Stack h="100%" gap="sm">
+      <Stack h="100%" gap="sm" style={{ minHeight: 0 }}>
         <div className="app-stat-grid">
           <div className="app-stat-card">
             <div className="app-stat-label">当前草稿</div>
@@ -915,8 +915,8 @@ const AnalysisPage = () => {
           </div>
         </div>
 
-      <Group align="stretch" h="100%" gap="xs" wrap="nowrap">
-        <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <Group align="stretch" h="100%" gap="xs" wrap="nowrap" style={{ flex: 1, minHeight: 0 }}>
+        <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
           <Paper
             withBorder
             radius="xl"
@@ -1009,8 +1009,8 @@ const AnalysisPage = () => {
               </Stack>
             </Box>
 
-            <Box style={{ flex: 1, overflow: 'hidden', background: '#f8fbf8' }}>
-              <ScrollArea h="100%">
+            <Box style={{ flex: 1, minHeight: 0, overflow: 'hidden', background: '#f8fbf8' }}>
+              <ScrollArea h="100%" style={{ minHeight: 0 }}>
                 <Stack gap="md" p="md">
                   <div className="page-toolbar">
                     <Group justify="space-between" wrap="wrap">
@@ -1091,7 +1091,7 @@ const AnalysisPage = () => {
         </Box>
 
         {/* 右侧：看板 */}
-        <Box style={{ width: 440, display: 'flex', flexDirection: 'column' }}>
+        <Box style={{ width: 440, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Paper withBorder radius="md" p="md" mb="xs" shadow="md" className="app-surface" style={{ background: 'linear-gradient(135deg, #0ca678 0%, #099268 100%)', color: '#fff' }}>
             <Title order={6} mb="md" style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 8 }}><IconCalculator size={20}/>工程全案汇总核算</Title>
             <SimpleGrid cols={2} spacing="lg">
@@ -1114,7 +1114,7 @@ const AnalysisPage = () => {
                 {activeWin && <Badge color="teal" variant="light">面积:{activeWin.area.toFixed(2)}㎡</Badge>}
               </Group>
             </Box>
-            <ScrollArea style={{ flex: 1 }}>
+            <ScrollArea style={{ flex: 1, minHeight: 0 }}>
               {activeWin ? (
                 <Stack gap={0}>
                   <Box p="md" style={{ background: '#ffffff', borderBottom: '1px solid #eef2f7' }}>

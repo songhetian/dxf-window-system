@@ -33,9 +33,6 @@ import {
   IconDatabaseImport,
   IconDownload,
   IconEdit,
-  IconHistory,
-  IconChevronDown,
-  IconChevronUp,
   IconList,
   IconPercentage,
   IconSearch,
@@ -167,14 +164,12 @@ export default function MaterialsPage() {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [favoriteMaterialIds, setFavoriteMaterialIds] = useState<string[]>([]);
-  const [recentMaterialIds, setRecentMaterialIds] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [bulkAdjustment, setBulkAdjustment] = useState<number | ''>('');
   const [bulkAdjustOpened, setBulkAdjustOpened] = useState(false);
   const [createModalOpened, setCreateModalOpened] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState<MaterialItem | null>(null);
-  const [recentExpanded, setRecentExpanded] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>('strict');
   const [importPreviewFilter, setImportPreviewFilter] = useState<ImportPreviewFilter>('all');
   const [importPreview, setImportPreview] = useState<ImportPreviewState>({
@@ -197,10 +192,8 @@ export default function MaterialsPage() {
 
   useEffect(() => {
     const favoriteRaw = window.localStorage.getItem('material-favorites');
-    const recentRaw = window.localStorage.getItem('material-recent');
     try {
       if (favoriteRaw) setFavoriteMaterialIds(JSON.parse(favoriteRaw));
-      if (recentRaw) setRecentMaterialIds(JSON.parse(recentRaw));
     } catch {
       // ignore malformed local cache
     }
@@ -209,10 +202,6 @@ export default function MaterialsPage() {
   useEffect(() => {
     window.localStorage.setItem('material-favorites', JSON.stringify(favoriteMaterialIds));
   }, [favoriteMaterialIds]);
-
-  useEffect(() => {
-    window.localStorage.setItem('material-recent', JSON.stringify(recentMaterialIds));
-  }, [recentMaterialIds]);
 
   useEffect(() => {
     setPage(1);
@@ -287,10 +276,35 @@ export default function MaterialsPage() {
     })
   ), [categoryNameMap, deferredKeyword, favoriteMaterialSet, materials, pricingModeMap, selectedCategoryId, showFavoritesOnly]);
 
-  const recentMaterials = useMemo(
-    () => recentMaterialIds.map((id) => materialMap.get(id)).filter(Boolean) as MaterialItem[],
-    [materialMap, recentMaterialIds],
+  const selectedMaterials = useMemo(
+    () => selectedMaterialIds.map((id) => materialMap.get(id)).filter(Boolean) as MaterialItem[],
+    [materialMap, selectedMaterialIds],
   );
+  const categorySummaries = useMemo(() => (
+    [
+      {
+        id: 'all',
+        name: '全部材料',
+        totalCount: materials.length,
+        visibleCount: filteredMaterials.length,
+      },
+      ...categories.map((category) => {
+        const totalCount = materials.filter((item) => item.categoryId === category.id).length;
+        const visibleCount = filteredMaterials.filter((item) => item.categoryId === category.id).length;
+        return {
+          id: category.id || '',
+          name: category.name,
+          totalCount,
+          visibleCount,
+        };
+      }),
+    ]
+  ), [categories, filteredMaterials, materials]);
+  const selectedMaterialAverageRetail = useMemo(() => (
+    selectedMaterials.length > 0
+      ? selectedMaterials.reduce((sum, item) => sum + Number(item.retailPrice || 0), 0) / selectedMaterials.length
+      : 0
+  ), [selectedMaterials]);
 
   const totalPages = Math.max(1, Math.ceil(filteredMaterials.length / pageSize));
   const pagedMaterials = useMemo(() => {
@@ -300,10 +314,6 @@ export default function MaterialsPage() {
 
   const allCurrentPageSelected = pagedMaterials.length > 0 && pagedMaterials.every((material) => selectedMaterialIds.includes(material.id || ''));
   const someCurrentPageSelected = pagedMaterials.some((material) => selectedMaterialIds.includes(material.id || ''));
-
-  const markRecent = (id: string) => {
-    setRecentMaterialIds((prev) => [id, ...prev.filter((item) => item !== id)].slice(0, 10));
-  };
 
   const toggleMaterialSelection = (id: string) => {
     setSelectedMaterialIds((prev) => prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]);
@@ -811,15 +821,25 @@ export default function MaterialsPage() {
         </Group>
       }
     >
-      <Tabs value={activeTab} onChange={setActiveTab} variant="pills" radius="xl">
+      <Tabs
+        value={activeTab}
+        onChange={setActiveTab}
+        variant="pills"
+        radius="xl"
+        className="materials-tabs"
+        styles={{
+          root: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 },
+          panel: { flex: 1, minHeight: 0 },
+        }}
+      >
         <Tabs.List mb="sm" p={3} style={{ background: 'var(--mantine-color-gray-1)', borderRadius: 100, width: 'fit-content' }}>
           <Tabs.Tab value="list" color="teal" leftSection={<IconList size={16} />}>材料列表</Tabs.Tab>
           <Tabs.Tab value="pricingModes" color="blue" leftSection={<IconPercentage size={16} />}>单位</Tabs.Tab>
           <Tabs.Tab value="categories" color="orange" leftSection={<IconCategory size={16} />}>分类管理</Tabs.Tab>
         </Tabs.List>
 
-        <Tabs.Panel value="list">
-          <Stack gap="sm">
+        <Tabs.Panel value="list" className="materials-tabs-panel">
+          <Stack gap="sm" h="100%">
             <div className="app-stat-grid">
               <div className="app-stat-card">
                 <div className="app-stat-label">材料总数</div>
@@ -837,29 +857,15 @@ export default function MaterialsPage() {
                 <div className="app-stat-note">分类规则会直接影响组合选材节奏</div>
               </div>
               <div className="app-stat-card">
-                <div className="app-stat-label">快捷访问</div>
-                <div className="app-stat-value">{favoriteMaterialIds.length + recentMaterials.length}</div>
-                <div className="app-stat-note">收藏 {favoriteMaterialIds.length} 项，最近 {recentMaterials.length} 项</div>
+                <div className="app-stat-label">收藏材料</div>
+                <div className="app-stat-value">{favoriteMaterialIds.length}</div>
+                <div className="app-stat-note">常用材料会固定保留在操作侧栏</div>
               </div>
             </div>
 
             <div className="page-toolbar">
               <Stack gap="sm">
                 <div className="page-toolbar-main">
-                  <Tooltip label="本页全选">
-                    <Checkbox
-                      size="sm"
-                      color="teal"
-                      checked={allCurrentPageSelected}
-                      indeterminate={!allCurrentPageSelected && someCurrentPageSelected}
-                      onChange={() => {
-                        const pageIds = pagedMaterials.map((material) => material.id || '');
-                        setSelectedMaterialIds((prev) => allCurrentPageSelected
-                          ? prev.filter((id) => !pageIds.includes(id))
-                          : Array.from(new Set([...prev, ...pageIds])));
-                      }}
-                    />
-                  </Tooltip>
                   <TextInput
                     size="sm"
                     placeholder="搜索材料、分类、单位"
@@ -867,6 +873,7 @@ export default function MaterialsPage() {
                     value={keyword}
                     onChange={(event) => setKeyword(event.currentTarget.value)}
                     className="page-toolbar-fill"
+                    maw={360}
                   />
                   <div className="page-toolbar-meta">
                     <Select
@@ -897,200 +904,239 @@ export default function MaterialsPage() {
                         <IconStar size={14} fill={showFavoritesOnly ? 'currentColor' : 'none'} />
                       </ActionIcon>
                     </Tooltip>
+                    <Tooltip label="本页全选">
+                      <Checkbox
+                        size="sm"
+                        color="teal"
+                        checked={allCurrentPageSelected}
+                        indeterminate={!allCurrentPageSelected && someCurrentPageSelected}
+                        onChange={() => {
+                          const pageIds = pagedMaterials.map((material) => material.id || '');
+                          setSelectedMaterialIds((prev) => allCurrentPageSelected
+                            ? prev.filter((id) => !pageIds.includes(id))
+                            : Array.from(new Set([...prev, ...pageIds])));
+                        }}
+                      />
+                    </Tooltip>
+                    <Button size="xs" variant="light" color="teal" disabled={selectedMaterialIds.length === 0} onClick={() => setBulkAdjustOpened(true)}>
+                      批量调价
+                    </Button>
+                    <Button size="xs" variant="light" color="red" disabled={selectedMaterialIds.length === 0} onClick={handleBulkDelete}>
+                      删除所选
+                    </Button>
+                    <Button size="xs" variant="subtle" color="gray" disabled={selectedMaterialIds.length === 0} onClick={() => setSelectedMaterialIds([])}>
+                      清空
+                    </Button>
                   </div>
                 </div>
-
-                {(recentMaterials.length > 0 || selectedMaterialIds.length > 0) && (
+                {selectedMaterialIds.length > 0 && (
                   <div className="selection-strip">
-                    <Group gap="xs" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
-                      {recentMaterials.length > 0 && (
-                        <>
-                          <IconHistory size={16} color="gray" />
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            color="gray"
-                            rightSection={recentExpanded ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-                            onClick={() => setRecentExpanded((prev) => !prev)}
-                          >
-                            最近 {recentMaterials.length}
-                          </Button>
-                          {recentExpanded && recentMaterials.slice(0, 4).map((material) => (
-                            <Button
-                              key={material.id}
-                              size="xs"
-                              variant="subtle"
-                              color="gray"
-                              onClick={() => setKeyword(material.name)}
-                            >
-                              {material.name}
-                            </Button>
-                          ))}
-                        </>
-                      )}
-                    </Group>
-                    {selectedMaterialIds.length > 0 && (
-                      <Group gap="xs" wrap="nowrap">
-                        <Badge size="sm" color="teal" variant="light">已选 {selectedMaterialIds.length} 项</Badge>
-                        <Button size="xs" color="teal" onClick={() => setBulkAdjustOpened(true)}>
-                          批量调价
-                        </Button>
-                        <Button size="xs" variant="light" color="gray" onClick={() => setSelectedMaterialIds([])}>
-                          清空
-                        </Button>
-                        <Button size="xs" variant="light" color="red" leftSection={<IconTrash size={13} />} onClick={handleBulkDelete}>
-                          删除
-                        </Button>
-                      </Group>
-                    )}
+                    <Text size="sm" fw={700}>已选 {selectedMaterialIds.length} 项材料，平均销售价 ¥ {selectedMaterialAverageRetail.toFixed(2)}</Text>
                   </div>
                 )}
               </Stack>
             </div>
 
-            <Box style={{ minHeight: 400 }}>
-              {pagedMaterials.length > 0 ? (
-                <>
-                  <Paper withBorder radius="md" className="app-surface app-table-shell">
-                    <ScrollArea h="calc(100vh - 290px)">
-                    <Table highlightOnHover striped verticalSpacing="sm" horizontalSpacing="sm" stickyHeader>
-                      <Table.Thead bg="gray.0">
-                        <Table.Tr>
-                          <Table.Th ta="center" w={52}></Table.Th>
-                          <Table.Th ta="left" w={320}>材料名称</Table.Th>
-                          <Table.Th ta="center">分类</Table.Th>
-                          <Table.Th ta="center" w={220}>单位</Table.Th>
-                          <Table.Th ta="right" w={120}>成本</Table.Th>
-                          <Table.Th ta="right" w={120}>销售</Table.Th>
-                          <Table.Th ta="left">备注</Table.Th>
-                          <Table.Th ta="center" w={96}>操作</Table.Th>
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {pagedMaterials.map((material) => {
-                          const categoryName = categoryNameMap.get(material.categoryId) || '未分类';
-                          const pricingMode = pricingModeMap.get(material.unitType);
-                          const isSelected = selectedMaterialSet.has(material.id || '');
-                          const isFavorite = favoriteMaterialSet.has(material.id || '');
+            <div className="app-split-two" style={{ flex: 1, minHeight: 0 }}>
+              <Paper withBorder radius="md" className="app-surface app-section">
+                <div className="app-section-header">
+                  <div>
+                    <div className="app-section-title">分类导航</div>
+                    <div className="app-section-subtitle">先按分类切范围，再在右侧做筛选和批量维护。</div>
+                  </div>
+                  <Badge variant="light" color="gray">{categories.length} 类</Badge>
+                </div>
+                <ScrollArea className="app-section-body">
+                  <Stack gap={8} className="list-stack">
+                    {categorySummaries.map((category) => {
+                      const isActive = selectedCategoryId === category.id;
+                      return (
+                        <Paper
+                          key={category.id}
+                          withBorder
+                          radius="md"
+                          p="sm"
+                          className={isActive ? 'list-item list-item-active' : 'list-item'}
+                          onClick={() => setSelectedCategoryId(category.id)}
+                        >
+                          <Group justify="space-between" wrap="nowrap" align="flex-start">
+                            <Box style={{ minWidth: 0, flex: 1 }}>
+                              <Text fw={800} size="sm" truncate>{category.name}</Text>
+                              <Text size="11px" c="dimmed" mt={4}>
+                                当前可见 {category.visibleCount} 项 / 总共 {category.totalCount} 项
+                              </Text>
+                            </Box>
+                            <Badge size="sm" variant={isActive ? 'filled' : 'light'} color={isActive ? 'teal' : 'gray'}>
+                              {category.visibleCount}
+                            </Badge>
+                          </Group>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                </ScrollArea>
+              </Paper>
 
-                          return (
-                            <Table.Tr
-                              key={material.id}
-                              bg={isSelected ? 'teal.0' : undefined}
-                              style={{ cursor: 'pointer' }}
-                              onClick={() => markRecent(material.id || '')}
-                            >
-                              <Table.Td ta="center">
-                                <Checkbox
-                                  size="sm"
-                                  checked={isSelected}
-                                  color="teal"
-                                  onClick={(event) => event.stopPropagation()}
-                                  onChange={() => toggleMaterialSelection(material.id || '')}
-                                />
-                              </Table.Td>
-                              <Table.Td ta="left">
-                                <Text fw={700} size="sm" truncate>{material.name}</Text>
-                              </Table.Td>
-                              <Table.Td ta="center">
-                                <Badge size="sm" variant="light" color="gray">{categoryName}</Badge>
-                              </Table.Td>
-                              <Table.Td ta="center">
-                                <Text size="sm">
-                                  {(pricingMode?.name || defaultUnitTextMap[material.unitType] || material.unitType)}
-                                  {' · '}
-                                  {formatUnitDisplay(material.unitType, material.unitLabel || pricingMode?.unitLabel)}
-                                </Text>
-                              </Table.Td>
-                              <Table.Td ta="right">
-                                <Text size="sm" fw={700} c="teal.8">¥ {material.costPrice.toFixed(2)}</Text>
-                              </Table.Td>
-                              <Table.Td ta="right">
-                                <Text size="sm" fw={700} c="orange.8">¥ {material.retailPrice.toFixed(2)}</Text>
-                              </Table.Td>
-                              <Table.Td ta="left">
-                                <Text size="xs" c="dimmed" lineClamp={2}>{material.remarks || '-'}</Text>
-                              </Table.Td>
-                              <Table.Td ta="center">
-                                <Group gap={6} justify="center" wrap="nowrap">
-                                  <Tooltip label="收藏">
-                                    <ActionIcon
-                                      variant={isFavorite ? 'filled' : 'subtle'}
-                                      color="yellow"
-                                      size="sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setFavoriteMaterialIds((prev) => prev.includes(material.id || '')
-                                          ? prev.filter((id) => id !== material.id)
-                                          : [...prev, material.id || '']);
-                                      }}
-                                    >
-                                      <IconStar size={16} fill={isFavorite ? 'currentColor' : 'none'} />
-                                    </ActionIcon>
-                                  </Tooltip>
-                                  <Tooltip label="复制">
-                                    <ActionIcon
-                                      variant="light"
-                                      color="gray"
-                                      size="sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        void handleDuplicate(material);
-                                      }}
-                                    >
-                                      <IconCopy size={14} />
-                                    </ActionIcon>
-                                  </Tooltip>
-                                  <Tooltip label="编辑">
-                                    <ActionIcon
-                                      variant="light"
-                                      color="indigo"
-                                      size="sm"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setEditingMaterial(material);
-                                      }}
-                                    >
-                                      <IconEdit size={14} />
-                                    </ActionIcon>
-                                  </Tooltip>
-                                  <Tooltip label="删除">
-                                    <ActionIcon
-                                      variant="light"
-                                      color="red"
-                                      size="sm"
-                                      onClick={async (event) => {
-                                        event.stopPropagation();
-                                        if (window.confirm(`确定删除 ${material.name}？`)) {
-                                          await deleteMaterial.mutateAsync(material.id || '');
-                                        }
-                                      }}
-                                    >
-                                      <IconTrash size={14} />
-                                    </ActionIcon>
-                                  </Tooltip>
-                                </Group>
-                              </Table.Td>
+              <Paper withBorder radius="md" className="app-surface app-section">
+                <div className="app-section-header">
+                  <div>
+                    <div className="app-section-title">材料清单</div>
+                    <div className="app-section-subtitle">当前分类下的材料明细，支持收藏、复制、编辑和删除。内容超出时直接滚动显示。</div>
+                  </div>
+                  <Text size="sm" c="dimmed">
+                    第 {page}/{totalPages} 页
+                  </Text>
+                </div>
+                <Box className="app-section-body" style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                  {pagedMaterials.length > 0 ? (
+                    <>
+                      <Paper withBorder radius="md" className="app-surface app-table-shell" m="sm" mb={0} style={{ flex: 1, minHeight: 0 }}>
+                        <ScrollArea h="100%">
+                        <Table highlightOnHover striped verticalSpacing="sm" horizontalSpacing="sm" stickyHeader>
+                          <Table.Thead bg="gray.0">
+                            <Table.Tr>
+                              <Table.Th ta="center" w={52}></Table.Th>
+                              <Table.Th ta="left" w={280}>材料名称</Table.Th>
+                              <Table.Th ta="center">分类</Table.Th>
+                              <Table.Th ta="center" w={220}>单位</Table.Th>
+                              <Table.Th ta="right" w={120}>成本</Table.Th>
+                              <Table.Th ta="right" w={120}>销售</Table.Th>
+                              <Table.Th ta="left">备注</Table.Th>
+                              <Table.Th ta="center" w={96}>操作</Table.Th>
                             </Table.Tr>
-                          );
-                        })}
-                      </Table.Tbody>
-                    </Table>
-                    </ScrollArea>
-                  </Paper>
+                          </Table.Thead>
+                          <Table.Tbody>
+                            {pagedMaterials.map((material) => {
+                              const categoryName = categoryNameMap.get(material.categoryId) || '未分类';
+                              const pricingMode = pricingModeMap.get(material.unitType);
+                              const isSelected = selectedMaterialSet.has(material.id || '');
+                              const isFavorite = favoriteMaterialSet.has(material.id || '');
 
-                  {totalPages > 1 && (
-                    <Center mt="md" pb="xs">
-                      <Pagination size="sm" total={totalPages} value={page} onChange={setPage} color="teal" radius="xl" withEdges siblings={1} boundaries={1} />
+                              return (
+                                <Table.Tr
+                                  key={material.id}
+                                  bg={isSelected ? 'teal.0' : undefined}
+                                  style={{ cursor: 'pointer' }}
+                                >
+                                  <Table.Td ta="center">
+                                    <Checkbox
+                                      size="sm"
+                                      checked={isSelected}
+                                      color="teal"
+                                      onClick={(event) => event.stopPropagation()}
+                                      onChange={() => toggleMaterialSelection(material.id || '')}
+                                    />
+                                  </Table.Td>
+                                  <Table.Td ta="left">
+                                    <Stack gap={4}>
+                                      <Text fw={700} size="sm" truncate>{material.name}</Text>
+                                      <Group gap={6}>
+                                        {isFavorite && <Badge size="xs" color="yellow" variant="light">收藏</Badge>}
+                                        <Badge size="xs" color="gray" variant="dot">{pricingMode?.name || defaultUnitTextMap[material.unitType] || material.unitType}</Badge>
+                                      </Group>
+                                    </Stack>
+                                  </Table.Td>
+                                  <Table.Td ta="center">
+                                    <Badge size="sm" variant="light" color="gray">{categoryName}</Badge>
+                                  </Table.Td>
+                                  <Table.Td ta="center">
+                                    <Text size="sm">
+                                      {(pricingMode?.name || defaultUnitTextMap[material.unitType] || material.unitType)}
+                                      {' · '}
+                                      {formatUnitDisplay(material.unitType, material.unitLabel || pricingMode?.unitLabel)}
+                                    </Text>
+                                  </Table.Td>
+                                  <Table.Td ta="right">
+                                    <Text size="sm" fw={700} c="teal.8">¥ {material.costPrice.toFixed(2)}</Text>
+                                  </Table.Td>
+                                  <Table.Td ta="right">
+                                    <Text size="sm" fw={700} c="orange.8">¥ {material.retailPrice.toFixed(2)}</Text>
+                                  </Table.Td>
+                                  <Table.Td ta="left">
+                                    <Text size="xs" c="dimmed" lineClamp={2}>{material.remarks || '-'}</Text>
+                                  </Table.Td>
+                                  <Table.Td ta="center">
+                                    <Group gap={6} justify="center" wrap="nowrap">
+                                      <Tooltip label="收藏">
+                                        <ActionIcon
+                                          variant={isFavorite ? 'filled' : 'subtle'}
+                                          color="yellow"
+                                          size="sm"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setFavoriteMaterialIds((prev) => prev.includes(material.id || '')
+                                              ? prev.filter((id) => id !== material.id)
+                                              : [...prev, material.id || '']);
+                                          }}
+                                        >
+                                          <IconStar size={16} fill={isFavorite ? 'currentColor' : 'none'} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                      <Tooltip label="复制">
+                                        <ActionIcon
+                                          variant="light"
+                                          color="gray"
+                                          size="sm"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            void handleDuplicate(material);
+                                          }}
+                                        >
+                                          <IconCopy size={14} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                      <Tooltip label="编辑">
+                                        <ActionIcon
+                                          variant="light"
+                                          color="indigo"
+                                          size="sm"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setEditingMaterial(material);
+                                          }}
+                                        >
+                                          <IconEdit size={14} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                      <Tooltip label="删除">
+                                        <ActionIcon
+                                          variant="light"
+                                          color="red"
+                                          size="sm"
+                                          onClick={async (event) => {
+                                            event.stopPropagation();
+                                            if (window.confirm(`确定删除 ${material.name}？`)) {
+                                              await deleteMaterial.mutateAsync(material.id || '');
+                                            }
+                                          }}
+                                        >
+                                          <IconTrash size={14} />
+                                        </ActionIcon>
+                                      </Tooltip>
+                                    </Group>
+                                  </Table.Td>
+                                </Table.Tr>
+                              );
+                            })}
+                          </Table.Tbody>
+                        </Table>
+                        </ScrollArea>
+                      </Paper>
+
+                      {totalPages > 1 && (
+                        <Center mt="md" pb="sm">
+                          <Pagination size="sm" total={totalPages} value={page} onChange={setPage} color="teal" radius="xl" withEdges siblings={1} boundaries={1} />
+                        </Center>
+                      )}
+                    </>
+                  ) : (
+                    <Center h="100%">
+                      <Text c="dimmed">未找到匹配材料</Text>
                     </Center>
                   )}
-                </>
-              ) : (
-                <Center h={300}>
-                  <Text c="dimmed">未找到匹配材料</Text>
-                </Center>
-              )}
-            </Box>
+                </Box>
+              </Paper>
+            </div>
           </Stack>
         </Tabs.Panel>
 
@@ -1353,6 +1399,13 @@ function CategoryManager({ materials }: { materials: MaterialItem[] }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const materialCountByCategory = useMemo(() => (
+    materials.reduce<Record<string, number>>((acc, material) => {
+      const key = material.categoryId || '';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})
+  ), [materials]);
 
   const handleMove = async (id: string, direction: number) => {
     const index = categories.findIndex((category) => category.id === id);
@@ -1366,10 +1419,10 @@ function CategoryManager({ materials }: { materials: MaterialItem[] }) {
   };
 
   return (
-    <Stack gap="sm">
-      <Paper withBorder p="sm" radius="md" bg="gray.0">
-        <Group align="flex-end" gap="sm" wrap="nowrap">
-          <TextInput size="sm" label="新增分类" placeholder="输入名称..." style={{ flex: 1 }} value={newName} onChange={(event) => setNewName(event.currentTarget.value)} />
+    <Stack gap="sm" h="calc(100vh - 220px)">
+      <Paper withBorder p="sm" radius="md" bg="gray.0" className="app-surface">
+        <Group align="flex-end" gap="sm" wrap="wrap">
+          <TextInput size="sm" label="新增分类" placeholder="输入名称..." maw={260} miw={180} style={{ flex: 1 }} value={newName} onChange={(event) => setNewName(event.currentTarget.value)} />
           <Switch size="sm" label="允许组合重复" checked={newAllowMultiple} onChange={(event) => setNewAllowMultiple(event.currentTarget.checked)} />
           <Button
             size="sm"
@@ -1391,8 +1444,15 @@ function CategoryManager({ materials }: { materials: MaterialItem[] }) {
         </Group>
       </Paper>
 
-      <Paper withBorder radius="md" style={{ overflow: 'hidden' }}>
-        <ScrollArea h="calc(100vh - 300px)">
+      <Paper withBorder radius="md" className="app-surface app-section">
+        <div className="app-section-header">
+          <div>
+            <div className="app-section-title">分类列表</div>
+            <div className="app-section-subtitle">超过可视高度时保持滚动，不再截断内容。</div>
+          </div>
+          <Badge size="sm" variant="light" color="orange">{categories.length} 类</Badge>
+        </div>
+        <ScrollArea className="app-section-body">
         <Table verticalSpacing="sm" horizontalSpacing="sm" stickyHeader>
           <Table.Thead bg="gray.1">
             <Table.Tr>
@@ -1406,7 +1466,7 @@ function CategoryManager({ materials }: { materials: MaterialItem[] }) {
           </Table.Thead>
           <Table.Tbody>
             {categories.map((category, index) => {
-              const count = materials.filter((material) => material.categoryId === category.id).length;
+              const count = materialCountByCategory[category.id || ''] || 0;
               const isEditing = editingId === category.id;
 
               return (

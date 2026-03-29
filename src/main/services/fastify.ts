@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
+import { app } from 'electron';
+import path from 'path';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -23,7 +25,7 @@ fastify.register(cors, {
 fastify.setValidatorCompiler(validatorCompiler);
 fastify.setSerializerCompiler(serializerCompiler);
 
-const db = initDb('./dxf-app.db');
+const db = initDb(path.join(app.getPath('userData'), 'dxf-app.db'));
 
 export const startServer = async (port: number = 3001) => {
   const api = fastify.withTypeProvider<ZodTypeProvider>();
