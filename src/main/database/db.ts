@@ -5,6 +5,11 @@ import {
   MaterialPricingMode,
   MaterialItem,
   PricingProduct,
+  PricingRate,
+  QuotationItem,
+  QuotationProject,
+  DrawingItem,
+  Standard,
 } from '../../shared/schemas';
 import fs from 'fs';
 import path from 'path';
@@ -15,6 +20,13 @@ interface DatabaseSchema {
   materials: MaterialItem;
   pricing_products: Omit<PricingProduct, 'items'>;
   pricing_product_items: any;
+  quotation_projects: Omit<QuotationProject, 'items' | 'sheets'>;
+  quotation_items: QuotationItem;
+  pricing_rates: PricingRate;
+  drawing_records: Omit<DrawingItem, 'allocationLabels'> & { allocationLabels: string };
+  window_records: any;
+  window_allocations: any;
+  standards: Standard;
 }
 
 export const initDb = (dbPath: string) => {
@@ -62,6 +74,9 @@ export const initDb = (dbPath: string) => {
     if (hasColumn('materials', 'id') && !hasColumn('materials', 'updatedAt')) {
       db.exec(`ALTER TABLE materials ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
     }
+    if (hasColumn('materials', 'id') && !hasColumn('materials', 'remarks')) {
+      db.exec(`ALTER TABLE materials ADD COLUMN remarks TEXT DEFAULT ''`);
+    }
     if (hasColumn('material_categories', 'id') && !hasColumn('material_categories', 'allowMultipleInProduct')) {
       db.exec(`ALTER TABLE material_categories ADD COLUMN allowMultipleInProduct INTEGER DEFAULT 0`);
     }
@@ -72,6 +87,12 @@ export const initDb = (dbPath: string) => {
     }
     if (hasColumn('pricing_products', 'id') && !hasColumn('pricing_products', 'updatedAt')) {
       db.exec(`ALTER TABLE pricing_products ADD COLUMN updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP`);
+    }
+    if (hasColumn('quotation_projects', 'id') && !hasColumn('quotation_projects', 'isCompleted')) {
+      db.exec(`ALTER TABLE quotation_projects ADD COLUMN isCompleted INTEGER DEFAULT 0`);
+    }
+    if (hasColumn('quotation_projects', 'id') && !hasColumn('quotation_projects', 'rateSettings')) {
+      db.exec(`ALTER TABLE quotation_projects ADD COLUMN rateSettings TEXT DEFAULT '[]'`);
     }
     if (hasColumn('pricing_product_items', 'id')) {
       if (!hasColumn('pricing_product_items', 'calcMode')) {
@@ -95,6 +116,46 @@ export const initDb = (dbPath: string) => {
       }
       if (!hasColumn('pricing_product_items', 'sortOrder')) {
         db.exec(`ALTER TABLE pricing_product_items ADD COLUMN sortOrder INTEGER DEFAULT 0`);
+      }
+    }
+    if (hasColumn('drawing_records', 'id')) {
+      if (!hasColumn('drawing_records', 'projectId')) {
+        db.exec(`ALTER TABLE drawing_records ADD COLUMN projectId TEXT`);
+      }
+      if (!hasColumn('drawing_records', 'sheetName')) {
+        db.exec(`ALTER TABLE drawing_records ADD COLUMN sheetName TEXT NOT NULL DEFAULT '新工作表'`);
+        if (hasColumn('drawing_records', 'projectName')) {
+          db.exec(`UPDATE drawing_records SET sheetName = COALESCE(NULLIF(projectName, ''), fileName, '新工作表')`);
+        }
+      }
+      if (!hasColumn('drawing_records', 'totalRetail')) {
+        db.exec(`ALTER TABLE drawing_records ADD COLUMN totalRetail REAL DEFAULT 0`);
+      }
+      if (!hasColumn('drawing_records', 'allocationLabels')) {
+        db.exec(`ALTER TABLE drawing_records ADD COLUMN allocationLabels TEXT DEFAULT '[]'`);
+      }
+      if (!hasColumn('drawing_records', 'rateSettings')) {
+        db.exec(`ALTER TABLE drawing_records ADD COLUMN rateSettings TEXT DEFAULT '[]'`);
+      }
+    }
+    if (hasColumn('window_records', 'id')) {
+      if (!hasColumn('window_records', 'calculatedArea')) {
+        db.exec(`ALTER TABLE window_records ADD COLUMN calculatedArea REAL DEFAULT 0`);
+      }
+      if (!hasColumn('window_records', 'unitRetailPrice')) {
+        db.exec(`ALTER TABLE window_records ADD COLUMN unitRetailPrice REAL DEFAULT 0`);
+      }
+      if (!hasColumn('window_records', 'totalRetailPrice')) {
+        db.exec(`ALTER TABLE window_records ADD COLUMN totalRetailPrice REAL DEFAULT 0`);
+      }
+      if (!hasColumn('window_records', 'windowType')) {
+        db.exec(`ALTER TABLE window_records ADD COLUMN windowType TEXT DEFAULT ''`);
+      }
+      if (!hasColumn('window_records', 'componentDetails')) {
+        db.exec(`ALTER TABLE window_records ADD COLUMN componentDetails TEXT DEFAULT '[]'`);
+      }
+      if (!hasColumn('window_records', 'accessoryDetails')) {
+        db.exec(`ALTER TABLE window_records ADD COLUMN accessoryDetails TEXT DEFAULT '[]'`);
       }
     }
   } catch (err) {

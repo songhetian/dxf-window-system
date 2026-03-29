@@ -1,4 +1,4 @@
-import { Button, Group, Modal, NumberInput, Select, SimpleGrid, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Group, Modal, NumberInput, Select, SimpleGrid, Stack, Text, TextInput, Textarea } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useEffect } from 'react';
 
@@ -9,6 +9,7 @@ type MaterialFormValues = {
   unitType: string;
   costPrice: number;
   retailPrice: number;
+  remarks: string;
 };
 
 interface MaterialFormModalProps {
@@ -56,6 +57,7 @@ export const MaterialFormModal = ({
     initialValues.unitType,
     initialValues.costPrice,
     initialValues.retailPrice,
+    initialValues.remarks,
   ]);
 
   return (
@@ -87,6 +89,13 @@ export const MaterialFormModal = ({
             <NumberInput label="成本单价" prefix="¥ " decimalScale={2} min={0} {...form.getInputProps('costPrice')} />
             <NumberInput label="销售单价" prefix="¥ " decimalScale={2} min={0} {...form.getInputProps('retailPrice')} />
           </SimpleGrid>
+
+          <Textarea
+            label="备注"
+            placeholder="输入材料备注信息..."
+            minRows={2}
+            {...form.getInputProps('remarks')}
+          />
 
           <Group justify="flex-end" mt="md">
             <Button variant="subtle" onClick={onClose}>取消</Button>

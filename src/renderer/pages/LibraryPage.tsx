@@ -69,6 +69,7 @@ const LibraryPage = () => {
     unitType: 'area' as 'area' | 'perimeter' | 'fixed',
     costPrice: 0,
     retailPrice: 0,
+    remarks: '',
   });
   const [productName, setProductName] = useState('');
   const [pricingMode, setPricingMode] = useState<'area' | 'perimeter' | 'fixed'>('area');
@@ -260,6 +261,12 @@ const LibraryPage = () => {
                     onChange={(value) => setMaterialForm((form) => ({ ...form, retailPrice: Number(value) || 0 }))}
                     min={0}
                   />
+                  <TextInput
+                    label="备注"
+                    placeholder="选填"
+                    value={materialForm.remarks}
+                    onChange={(event) => setMaterialForm((form) => ({ ...form, remarks: event.currentTarget.value }))}
+                  />
                   <Button
                     leftSection={<IconPlus size={16} />}
                     onClick={async () => {
@@ -269,7 +276,7 @@ const LibraryPage = () => {
                         name: materialForm.name.trim(),
                         unitLabel: unitLabelMap[materialForm.unitType],
                       });
-                      setMaterialForm({ categoryId: '', name: '', unitType: 'area', costPrice: 0, retailPrice: 0 });
+                      setMaterialForm({ categoryId: '', name: '', unitType: 'area', costPrice: 0, retailPrice: 0, remarks: '' });
                     }}
                   >
                     保存材料
@@ -289,6 +296,7 @@ const LibraryPage = () => {
                           <Table.Th>方式</Table.Th>
                           <Table.Th>成本</Table.Th>
                           <Table.Th>销售</Table.Th>
+                          <Table.Th>备注</Table.Th>
                           <Table.Th></Table.Th>
                         </Table.Tr>
                       </Table.Thead>
@@ -300,6 +308,9 @@ const LibraryPage = () => {
                             <Table.Td>{material.unitLabel}</Table.Td>
                             <Table.Td>{material.costPrice}</Table.Td>
                             <Table.Td>{material.retailPrice}</Table.Td>
+                            <Table.Td>
+                              <Text size="xs" c="dimmed" lineClamp={2}>{material.remarks || '-'}</Text>
+                            </Table.Td>
                             <Table.Td>
                               <ActionIcon color="red" variant="subtle" onClick={() => deleteMaterial.mutate(material.id || '')}>
                                 <IconTrash size={16} />

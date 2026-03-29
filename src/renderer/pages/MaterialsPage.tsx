@@ -44,7 +44,6 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import * as XLSX from 'xlsx';
 
 import { PageScaffold } from '../components/ui/PageScaffold';
 import { MaterialFormModal } from '../features/materials/MaterialFormModal';
@@ -88,6 +87,7 @@ const EMPTY_FORM = {
   unitType: 'area',
   costPrice: 0,
   retailPrice: 0,
+  remarks: '',
 };
 
 const IMPORT_ERROR_PREVIEW_LIMIT = 8;
@@ -110,6 +110,7 @@ type ImportPayloadItem = {
   unitLabel: string;
   costPrice: number;
   retailPrice: number;
+  remarks: string;
 };
 
 type ImportPreviewState = {
@@ -148,6 +149,8 @@ const downloadExcelBlob = (content: Uint8Array, fileName: string) => {
   link.click();
   URL.revokeObjectURL(url);
 };
+
+const loadXLSX = async () => await import('xlsx');
 
 export default function MaterialsPage() {
   const { data: categories = [] } = useMaterialCategories();
@@ -384,6 +387,7 @@ export default function MaterialsPage() {
         { header: '计价方式', key: 'modeName', width: 18 },
         { header: '成本单价', key: 'costPrice', width: 14 },
         { header: '销售单价', key: 'retailPrice', width: 14 },
+        { header: '备注', key: 'remarks', width: 30 },
       ];
       templateSheet.addRows([
         {
@@ -392,6 +396,7 @@ export default function MaterialsPage() {
           modeName: firstMode?.name || '按面积',
           costPrice: 100,
           retailPrice: 150,
+          remarks: '国标 1.4mm',
         },
         {
           name: '示例玻璃B',
@@ -399,10 +404,11 @@ export default function MaterialsPage() {
           modeName: pricingModes[1]?.name || firstMode?.name || '按面积',
           costPrice: 88,
           retailPrice: 128,
+          remarks: '5+12A+5 中空钢化',
         },
       ]);
       templateSheet.views = [{ state: 'frozen', ySplit: 1 }];
-      templateSheet.autoFilter = 'A1:E1';
+      templateSheet.autoFilter = 'A1:F1';
 
       templateSheet.getRow(1).font = { bold: true };
       templateSheet.getRow(1).fill = {
@@ -488,6 +494,7 @@ export default function MaterialsPage() {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
+        const XLSX = await loadXLSX();
         const data = new Uint8Array(event.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -513,8 +520,9 @@ export default function MaterialsPage() {
           const mode = pricingModeMap.get(modeId);
           const costPrice = Number(row['成本单价']);
           const retailPrice = Number(row['销售单价']);
+          const remarks = String(row['备注'] || '').trim();
 
-          if (!name && !categoryName && !modeName && String(row['成本单价'] || '').trim() === '' && String(row['销售单价'] || '').trim() === '') {
+          if (!name && !categoryName && !modeName && String(row['成本单价'] || '').trim() === '' && String(row['销售单价'] || '').trim() === '' && !remarks) {
             return;
           }
 
@@ -528,6 +536,7 @@ export default function MaterialsPage() {
               计价方式: modeName,
               成本单价: String(row['成本单价'] ?? ''),
               销售单价: String(row['销售单价'] ?? ''),
+              备注: remarks,
             });
           };
 
@@ -578,6 +587,7 @@ export default function MaterialsPage() {
             unitLabel: mode?.unitLabel || '㎡',
             costPrice,
             retailPrice,
+            remarks,
           });
         });
 
@@ -751,6 +761,8 @@ export default function MaterialsPage() {
   const handleDownloadImportErrorReport = () => {
     if (importResult.reportRows.length === 0) return;
 
+    void (async () => {
+      const XLSX = await loadXLSX();
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(importResult.reportRows);
     ws['!cols'] = [
@@ -764,12 +776,13 @@ export default function MaterialsPage() {
     ];
     XLSX.utils.book_append_sheet(wb, ws, '导入错误');
     XLSX.writeFile(wb, '材料导入错误明细.xlsx');
+    })();
   };
 
   return (
     <PageScaffold
-      title="材料库"
-      description="管理材料、分类和单位。这里恢复成更舒适的操作尺寸，方便录入和批量处理。"
+      title="材料单价"
+      description="在这里维护材料、分类和单位，后面的组合和报价都会直接引用这里的单价。"
       actions={
         <Group gap="xs">
           <Button size="sm" variant="subtle" color="gray" leftSection={<IconDownload size={16} />} onClick={handleDownloadTemplate}>
@@ -807,9 +820,32 @@ export default function MaterialsPage() {
 
         <Tabs.Panel value="list">
           <Stack gap="sm">
-            <Paper withBorder p="sm" radius="md">
+            <div className="app-stat-grid">
+              <div className="app-stat-card">
+                <div className="app-stat-label">材料总数</div>
+                <div className="app-stat-value">{materials.length}</div>
+                <div className="app-stat-note">当前可用于组合和报价的基础材料项</div>
+              </div>
+              <div className="app-stat-card">
+                <div className="app-stat-label">筛选结果</div>
+                <div className="app-stat-value">{filteredMaterials.length}</div>
+                <div className="app-stat-note">会随关键词、分类和收藏条件联动更新</div>
+              </div>
+              <div className="app-stat-card">
+                <div className="app-stat-label">分类数量</div>
+                <div className="app-stat-value">{categories.length}</div>
+                <div className="app-stat-note">分类规则会直接影响组合选材节奏</div>
+              </div>
+              <div className="app-stat-card">
+                <div className="app-stat-label">快捷访问</div>
+                <div className="app-stat-value">{favoriteMaterialIds.length + recentMaterials.length}</div>
+                <div className="app-stat-note">收藏 {favoriteMaterialIds.length} 项，最近 {recentMaterials.length} 项</div>
+              </div>
+            </div>
+
+            <div className="page-toolbar">
               <Stack gap="sm">
-                <Group wrap="nowrap" align="center">
+                <div className="page-toolbar-main">
                   <Tooltip label="本页全选">
                     <Checkbox
                       size="sm"
@@ -830,40 +866,42 @@ export default function MaterialsPage() {
                     leftSection={<IconSearch size={16} />}
                     value={keyword}
                     onChange={(event) => setKeyword(event.currentTarget.value)}
-                    style={{ flex: 1 }}
+                    className="page-toolbar-fill"
                   />
-                  <Select
-                    size="sm"
-                    placeholder="分类"
-                    leftSection={<IconCategory size={15} />}
-                    data={[{ value: 'all', label: '全部' }, ...categories.map((category) => ({ value: category.id || '', label: category.name }))]}
-                    value={selectedCategoryId}
-                    onChange={(value) => setSelectedCategoryId(value || 'all')}
-                    w={160}
-                  />
-                  <Select
-                    size="sm"
-                    leftSection={<IconChecklist size={15} />}
-                    data={PAGE_SIZE_OPTIONS}
-                    value={String(pageSize)}
-                    onChange={(value) => setPageSize(Number(value) || 20)}
-                    w={120}
-                  />
-                  <Tooltip label={showFavoritesOnly ? '显示全部材料' : '仅看收藏'}>
-                    <ActionIcon
-                      size="lg"
-                      radius="xl"
-                      variant={showFavoritesOnly ? 'filled' : 'light'}
-                      color="yellow"
-                      onClick={() => setShowFavoritesOnly((prev) => !prev)}
-                    >
-                      <IconStar size={14} fill={showFavoritesOnly ? 'currentColor' : 'none'} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
+                  <div className="page-toolbar-meta">
+                    <Select
+                      size="sm"
+                      placeholder="分类"
+                      leftSection={<IconCategory size={15} />}
+                      data={[{ value: 'all', label: '全部' }, ...categories.map((category) => ({ value: category.id || '', label: category.name }))]}
+                      value={selectedCategoryId}
+                      onChange={(value) => setSelectedCategoryId(value || 'all')}
+                      w={160}
+                    />
+                    <Select
+                      size="sm"
+                      leftSection={<IconChecklist size={15} />}
+                      data={PAGE_SIZE_OPTIONS}
+                      value={String(pageSize)}
+                      onChange={(value) => setPageSize(Number(value) || 20)}
+                      w={120}
+                    />
+                    <Tooltip label={showFavoritesOnly ? '显示全部材料' : '仅看收藏'}>
+                      <ActionIcon
+                        size="lg"
+                        radius="xl"
+                        variant={showFavoritesOnly ? 'filled' : 'light'}
+                        color="yellow"
+                        onClick={() => setShowFavoritesOnly((prev) => !prev)}
+                      >
+                        <IconStar size={14} fill={showFavoritesOnly ? 'currentColor' : 'none'} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </div>
+                </div>
 
                 {(recentMaterials.length > 0 || selectedMaterialIds.length > 0) && (
-                  <Group justify="space-between" gap="sm" wrap="nowrap">
+                  <div className="selection-strip">
                     <Group gap="xs" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
                       {recentMaterials.length > 0 && (
                         <>
@@ -905,15 +943,15 @@ export default function MaterialsPage() {
                         </Button>
                       </Group>
                     )}
-                  </Group>
+                  </div>
                 )}
               </Stack>
-            </Paper>
+            </div>
 
             <Box style={{ minHeight: 400 }}>
               {pagedMaterials.length > 0 ? (
                 <>
-                  <Paper withBorder radius="md" style={{ overflow: 'hidden' }}>
+                  <Paper withBorder radius="md" className="app-surface app-table-shell">
                     <ScrollArea h="calc(100vh - 290px)">
                     <Table highlightOnHover striped verticalSpacing="sm" horizontalSpacing="sm" stickyHeader>
                       <Table.Thead bg="gray.0">
@@ -924,6 +962,7 @@ export default function MaterialsPage() {
                           <Table.Th ta="center" w={220}>单位</Table.Th>
                           <Table.Th ta="right" w={120}>成本</Table.Th>
                           <Table.Th ta="right" w={120}>销售</Table.Th>
+                          <Table.Th ta="left">备注</Table.Th>
                           <Table.Th ta="center" w={96}>操作</Table.Th>
                         </Table.Tr>
                       </Table.Thead>
@@ -968,6 +1007,9 @@ export default function MaterialsPage() {
                               </Table.Td>
                               <Table.Td ta="right">
                                 <Text size="sm" fw={700} c="orange.8">¥ {material.retailPrice.toFixed(2)}</Text>
+                              </Table.Td>
+                              <Table.Td ta="left">
+                                <Text size="xs" c="dimmed" lineClamp={2}>{material.remarks || '-'}</Text>
                               </Table.Td>
                               <Table.Td ta="center">
                                 <Group gap={6} justify="center" wrap="nowrap">
@@ -1095,6 +1137,7 @@ export default function MaterialsPage() {
           unitType: editingMaterial.unitType,
           costPrice: editingMaterial.costPrice,
           retailPrice: editingMaterial.retailPrice,
+          remarks: editingMaterial.remarks || '',
         } : { ...EMPTY_FORM, unitType: pricingModes[0]?.id || 'area' }}
         loading={updateMaterial.isPending}
         onClose={() => setEditingMaterial(null)}
@@ -1109,6 +1152,7 @@ export default function MaterialsPage() {
               unitLabel: pricingMode?.unitLabel || '',
               costPrice: values.costPrice,
               retailPrice: values.retailPrice,
+              remarks: values.remarks,
             },
           });
           setEditingMaterial(null);

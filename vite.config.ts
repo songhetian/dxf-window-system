@@ -43,6 +43,18 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist/renderer',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('/exceljs/')) return 'exceljs';
+          if (id.includes('/xlsx/')) return 'xlsx';
+          if (id.includes('/@mantine/')) return 'mantine';
+          if (id.includes('/@tanstack/react-query/')) return 'react-query';
+          if (id.includes('/react-router-dom/') || id.includes('/react-dom/') || id.includes('/react/')) return 'react-vendor';
+        },
+      },
+    },
   },
   server: {
     port: 6001,

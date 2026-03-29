@@ -68,6 +68,12 @@ const laneMeta: Record<CalcMode, { title: string; description: string; color: st
   fixed: { title: '按固定项', description: '五金、工艺、辅件等按件数计入', color: 'orange', icon: IconLock },
 };
 
+const summaryBadgeMeta: Record<CalcMode, { label: string; color: string }> = {
+  area: { label: '平米', color: 'teal' },
+  perimeter: { label: '长度', color: 'blue' },
+  fixed: { label: '固定', color: 'orange' },
+};
+
 const laneTintMap: Record<CalcMode, { bg: string; border: string; emptyBg: string }> = {
   area: { bg: 'rgba(236, 253, 245, 0.76)', border: 'rgba(52, 211, 153, 0.30)', emptyBg: 'rgba(255, 255, 255, 0.78)' },
   perimeter: { bg: 'rgba(239, 246, 255, 0.76)', border: 'rgba(96, 165, 250, 0.30)', emptyBg: 'rgba(255, 255, 255, 0.78)' },
@@ -118,6 +124,19 @@ const buildAutoProductName = (
   .map((item) => materialMap.get(item.materialId)?.name?.trim())
   .filter((name): name is string => Boolean(name))
   .join('+');
+
+const deriveProductPricingMode = (items: ProductDraftItem[]): CalcMode => {
+  const includedItems = items.filter((item) => item.includeInComboTotal);
+  const sourceItems = includedItems.length > 0 ? includedItems : items;
+  const modeCount = sourceItems.reduce<Record<CalcMode, number>>((sum, item) => {
+    sum[item.calcMode] += 1;
+    return sum;
+  }, { area: 0, perimeter: 0, fixed: 0 });
+
+  return (['area', 'perimeter', 'fixed'] as const).reduce((current, mode) => (
+    modeCount[mode] > modeCount[current] ? mode : current
+  ), 'area');
+};
 
 const DraftItemCard = memo(({
   item,
@@ -362,6 +381,11 @@ const ProductsPage = () => {
     return { area, perimeter, fixed, total: area + perimeter + fixed };
   }, [laneItemsMap, priceView]);
 
+  const includedSummaryModes = useMemo(
+    () => (['area', 'perimeter', 'fixed'] as const).filter((mode) => laneItemsMap[mode].some((item) => item.includeInComboTotal)),
+    [laneItemsMap],
+  );
+
   const toggleSelectedMaterial = (id: string) => {
     setSelectedMaterialIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
@@ -497,7 +521,7 @@ const ProductsPage = () => {
 
     const payload = {
       name: finalProductName,
-      pricingMode: 'area' as const,
+      pricingMode: deriveProductPricingMode(productItems),
       items: productItems.map((item, index) => ({
         materialId: item.materialId,
         calcMode: item.calcMode,
@@ -532,11 +556,34 @@ const ProductsPage = () => {
 
   return (
     <PageScaffold
-      title="组合设置"
-      description="每个组合项都可以单独开关是否计入组合总价；新增时默认继承单位里的设置。"
+      title="新建组合"
+      description="把材料搭成一个可复用的产品组合；每一项都能单独决定是否计入组合总价。"
     >
       <Stack h="100%" gap="sm">
-        <Paper withBorder radius={12} p="xs">
+        <div className="app-stat-grid">
+          <div className="app-stat-card">
+            <div className="app-stat-label">材料分组</div>
+            <div className="app-stat-value">{groupedMaterials.length}</div>
+            <div className="app-stat-note">按分类组织材料，方便快速拖拽成组合</div>
+          </div>
+          <div className="app-stat-card">
+            <div className="app-stat-label">当前组合项</div>
+            <div className="app-stat-value">{productItems.length}</div>
+            <div className="app-stat-note">已加入三个计价通道的材料条目总数</div>
+          </div>
+          <div className="app-stat-card">
+            <div className="app-stat-label">已计入总价</div>
+            <div className="app-stat-value">{includedSummaryModes.length}</div>
+            <div className="app-stat-note">当前有 {includedSummaryModes.length} 个计价通道参与组合总价</div>
+          </div>
+          <div className="app-stat-card">
+            <div className="app-stat-label">组合总计</div>
+            <div className="app-stat-value">{totalsByMode.total.toFixed(2)}</div>
+            <div className="app-stat-note">{priceView === 'cost' ? '当前查看成本口径' : '当前查看销售口径'}</div>
+          </div>
+        </div>
+
+        <Paper withBorder radius={12} p="xs" className="app-surface">
           <Group justify="space-between" align="center">
             <Box>
               <Title order={5}>{editingProductId ? '编辑组合' : '新建组合'}</Title>
@@ -569,43 +616,53 @@ const ProductsPage = () => {
           </Group>
 
           <Group mt="xs" gap="xs" wrap="nowrap">
-            <Badge size="lg" radius="sm" color="teal" variant="light">平米 {totalsByMode.area.toFixed(2)}</Badge>
-            <Badge size="lg" radius="sm" color="blue" variant="light">长度 {totalsByMode.perimeter.toFixed(2)}</Badge>
-            <Badge size="lg" radius="sm" color="orange" variant="light">固定 {totalsByMode.fixed.toFixed(2)}</Badge>
+            {includedSummaryModes.map((mode) => (
+              <Badge key={mode} size="lg" radius="sm" color={summaryBadgeMeta[mode].color} variant="light">
+                {summaryBadgeMeta[mode].label} {totalsByMode[mode].toFixed(2)}
+              </Badge>
+            ))}
             <Badge size="lg" radius="sm" color="dark" variant="filled">总计 {totalsByMode.total.toFixed(2)}</Badge>
           </Group>
         </Paper>
 
         <Box style={{ display: 'grid', gridTemplateColumns: '460px minmax(0, 1fr)', gap: 12, flex: 1, minHeight: 0 }}>
-          <Paper withBorder radius={12} p="sm" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <Paper withBorder radius={12} p="sm" className="app-surface app-section">
             <Stack gap="xs" style={{ flex: 1, minHeight: 0 }}>
-              <Group justify="space-between">
-                <Title order={6}>材料库</Title>
+              <div className="app-section-header">
+                <div>
+                  <div className="app-section-title">材料库</div>
+                  <div className="app-section-subtitle">双击、点 + 或拖拽到右侧通道，快速搭建组合。</div>
+                </div>
                 <Group gap="xs">
                   <Badge variant="light">{materials.length} 条</Badge>
-                  <Text size="10px" c="dimmed">双击或点 + 快速加入</Text>
+                  <Text size="10px" c="dimmed">支持批量加入</Text>
                 </Group>
-              </Group>
+              </div>
 
-              <Group grow align="flex-end">
-                <TextInput
-                  size="xs"
-                  leftSection={<IconSearch size={16} />}
-                  placeholder="搜索材料"
-                  value={materialKeyword}
-                  onChange={(event) => setMaterialKeyword(event.currentTarget.value)}
-                />
-                <NumberInput
-                  size="xs"
-                  label={priceView === 'cost' ? '最高成本价' : '最高销售价'}
-                  value={maxPrice}
-                  onChange={(value) => setMaxPrice(typeof value === 'number' ? value : '')}
-                  min={0}
-                />
-              </Group>
+              <div className="page-toolbar">
+                <div className="page-toolbar-main">
+                  <TextInput
+                    size="xs"
+                    leftSection={<IconSearch size={16} />}
+                    placeholder="搜索材料"
+                    value={materialKeyword}
+                    onChange={(event) => setMaterialKeyword(event.currentTarget.value)}
+                    className="page-toolbar-fill"
+                  />
+                  <div className="page-toolbar-meta">
+                    <NumberInput
+                      size="xs"
+                      label={priceView === 'cost' ? '最高成本价' : '最高销售价'}
+                      value={maxPrice}
+                      onChange={(value) => setMaxPrice(typeof value === 'number' ? value : '')}
+                      min={0}
+                    />
+                  </div>
+                </div>
+              </div>
 
               {selectedMaterialIds.length > 0 && (
-                <Group justify="space-between" p="xs" bg="var(--mantine-color-gray-0)" style={{ borderRadius: 10 }}>
+                <div className="selection-strip">
                   <Text size="xs" fw={700}>已选中 {selectedMaterialIds.length} 项</Text>
                   <Group gap="xs">
                     <Button size="compact-xs" color="teal" onClick={() => addMaterialsToLane('area')}>平米</Button>
@@ -613,7 +670,7 @@ const ProductsPage = () => {
                     <Button size="compact-xs" color="orange" onClick={() => addMaterialsToLane('fixed')}>固定</Button>
                     <Button size="xs" variant="subtle" onClick={() => setSelectedMaterialIds([])}>清空</Button>
                   </Group>
-                </Group>
+                </div>
               )}
 
               <ScrollArea className="soft-scroll" style={{ flex: 1 }}>
@@ -707,7 +764,7 @@ const ProductsPage = () => {
             </Stack>
           </Paper>
 
-          <ScrollArea className="soft-scroll" style={{ minHeight: 0 }}>
+          <ScrollArea className="soft-scroll app-surface" style={{ minHeight: 0, borderRadius: 12 }}>
             <Stack gap="sm">
               {(['area', 'perimeter', 'fixed'] as CalcMode[]).map((mode) => {
                 const meta = laneMeta[mode];
