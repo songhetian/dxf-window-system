@@ -783,6 +783,7 @@ export default function MaterialsPage() {
       { wch: 18 },
       { wch: 14 },
       { wch: 14 },
+      { wch: 30 },
     ];
     XLSX.utils.book_append_sheet(wb, ws, '导入错误');
     XLSX.writeFile(wb, '材料导入错误明细.xlsx');
